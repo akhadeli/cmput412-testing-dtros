@@ -68,6 +68,8 @@ class Rotate(DTROS):
                 msg = f""" total_change_angle: {total_change_angle}, target_radian {target_radian}"""
                 rospy.loginfo(msg)
                 if abs(total_change_angle) >= (abs(target_radian) - self._tolerance):
+                    stop = WheelsCmdStamped(vel_left=0, vel_right=0)
+                    self._publisher.publish(stop)
                     break
                 self._publisher.publish(message)
                 rate.sleep()
@@ -97,10 +99,13 @@ class RotateTask():
         return self._direction_left
         
 if __name__ == "__main__":
-    precision = 15 # published messages per second
-    tolerance = 0.4 # accept total change in angle within tolerance
-    throttle = 0.5 # 50% throttle
-    tasks = [RotateTask((-math.pi/2)), RotateTask((math.pi/2))]
-    node = Rotate(node_name="rotate_node", tasks=tasks, throttle=throttle, tolerance=tolerance, precision=precision)
-    node.run()
-    rospy.spin()
+    try:
+        precision = 40 # published messages per second
+        tolerance = 0.1 # accept total change in angle within tolerance
+        throttle = 0.3
+        tasks = [RotateTask((-math.pi/2)), RotateTask((math.pi/2))]
+        node = Rotate(node_name="rotate_node", tasks=tasks, throttle=throttle, tolerance=tolerance, precision=precision)
+        node.run()
+        rospy.spin()
+    except rospy.ROSInterruptException:
+        pass
