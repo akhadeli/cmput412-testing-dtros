@@ -45,7 +45,10 @@ def plot(filename, robot_name):
 
     bag.close()
     plt.figure(figsize=(8, 6))
-    plt.plot(x_world_values, y_world_values, label="Robot Path", marker="o", markersize=3, linestyle="-")
+    plt.plot(x_world_values, y_world_values, label="Robot Path", marker="o", markersize=1, linestyle="-")
+    print(min(x_world_values + y_world_values), max(x_world_values + y_world_values))
+    plt.xlim(min(x_world_values + y_world_values), max(x_world_values + y_world_values))
+    plt.ylim(min(x_world_values + y_world_values), max(x_world_values + y_world_values))
     plt.xlabel("X Position (m)")
     plt.ylabel("Y Position (m)")
     plt.title("Robot Trajectory in World Frame")

@@ -3,21 +3,26 @@
 import os
 import rospy
 from duckietown.dtros import DTROS, NodeType
-from duckietown_msgs.msg import WheelsCmdStamped, WheelEncoderStamped
+from std_msgs.msg import String
+from duckietown_msgs.msg import WheelsCmdStamped, WheelEncoderStamped, LEDPattern
 import math
 import time
+from std_msgs.msg import ColorRGBA, Header
 
-LEFT_OFFSET = 1.03
 
 class DPATH(DTROS):
-    def __init__(self, node_name, tasks, throttle, tolerance, precision):
+    def __init__(self, node_name, tasks):
         super(DPATH, self).__init__(node_name=node_name, node_type=NodeType.GENERIC)
 
         self._vehicle_name = os.environ["VEHICLE_NAME"]
         self._radius = rospy.get_param(f'/{self._vehicle_name}/kinematics_node/radius', 0.0318)
 
         wheels_topic = f"/{self._vehicle_name}/wheels_driver_node/wheels_cmd"
+        state_topic = f"/{self._vehicle_name}/state"
         self._publisher = rospy.Publisher(wheels_topic, WheelsCmdStamped, queue_size=1)
+        self._led_publisher = rospy.Publisher(f'/{self._vehicle_name}/led_emitter_node/led_pattern', LEDPattern, queue_size=10)
+        self._state_publisher = rospy.Publisher(state_topic, String, queue_size=1)
+
         
         self._left_encoder_topic = f"/{self._vehicle_name}/left_wheel_encoder_node/tick"
         self._right_encoder_topic = f"/{self._vehicle_name}/right_wheel_encoder_node/tick"
@@ -29,15 +34,11 @@ class DPATH(DTROS):
 
         self._distance_left = 0
         self._distance_right = 0
-
-        self._throttle = throttle
         
-        self._l = 0.05
+        self._l = 0.050
 
         self._resolution = 135
 
-        self._tolerance = tolerance
-        self._precision = precision
         self._tasks = tasks
 
     def callback_left(self, data):
@@ -59,105 +60,105 @@ class DPATH(DTROS):
     def run(self):
         for task in self._tasks:
 
+            if not isinstance(task,Task):
+                raise ValueError("task not recognized")
+            
             self._distance_right = 0
             self._distance_left = 0
 
-            if isinstance(task, RotateTask):
-
-                dir_r_wheel = task.get_direction_of_right_wheel()
-                dir_l_wheel = task.get_direction_of_left_wheel()
-                target_radian = task.get_angle_rotation_radians()
-
-                msg = f""" Running a rotate task ... target radian : {target_radian}"""
-                rospy.loginfo(msg)
-
-                rate = rospy.Rate(self._precision)
-                message = WheelsCmdStamped(vel_left=self._throttle*dir_l_wheel*0.7*LEFT_OFFSET, vel_right=self._throttle*dir_r_wheel*0.7)
-
-                while not rospy.is_shutdown():
-                    total_change_angle = ( self._distance_right - self._distance_left ) / (2*self._l)
-                    msg = f""" total_change_angle: {total_change_angle}, target_radian {target_radian}"""
-                    rospy.loginfo(msg)
-                    if abs(total_change_angle) >= (abs(target_radian) - self._tolerance):
-                        stop = WheelsCmdStamped(vel_left=0, vel_right=0)
-                        self._publisher.publish(stop)
-                        break
-                    self._publisher.publish(message)
-                    rate.sleep()
-
-                msg = f""" total_change_angle: {total_change_angle}, target_radian {target_radian}"""
-                rospy.loginfo(msg)
-
-            elif (isinstance(task, StraightTask)):
-
-                target_distance = task.get_target_distance()
-
-                msg = f""" Running a straight task ... target distance {target_distance} """
-                rospy.loginfo(msg)
-
-                rate = rospy.Rate(self._precision)
-                message = WheelsCmdStamped(vel_left=self._throttle*1*LEFT_OFFSET, vel_right=self._throttle*1)
-
-                while not rospy.is_shutdown():
-                    distance_so_far = ( self._distance_left + self._distance_right ) / 2
-                    msg = f""" distance_so_far: {distance_so_far}, target_distance :{target_distance}"""
-                    rospy.loginfo(msg)
-                    if distance_so_far >= ( target_distance - self._tolerance ):
-                        stop = WheelsCmdStamped(vel_left=0, vel_right=0)
-                        self._publisher.publish(stop)
-                        break
-                    self._publisher.publish(message)
-                    rate.sleep()
-                msg = f""" distance_so_far: {distance_so_far}, target_distance :{target_distance}"""
-                rospy.loginfo(msg)
-
-            elif (isinstance(task, CurveTask)):
-
-                target_radian = task.get_target_radian()
-                R = task.get_R()
-
-                msg = f""" Running a curve task ... target_angle : {target_radian}, R: {R} """
-                rospy.loginfo(msg)
-
-                rate = rospy.Rate(self._precision)
-
-                d_L = abs(target_radian * (R - self._l))
-                d_R = abs(target_radian * (R + self._l))
-                rospy.loginfo(f"{d_L} {d_R}")
-
-                throttle_L = (d_L if d_L > d_R else 0) + (1 - max(d_L, d_R))
-                throttle_R = (d_R if d_R > d_L else 0) + (1 - max(d_L, d_R))
-                rospy.loginfo(f"{throttle_L} {throttle_R}")
-
-                message = WheelsCmdStamped(vel_left=throttle_L*LEFT_OFFSET, vel_right=throttle_R)
-
-                while not rospy.is_shutdown():
-                    total_change_angle = ( self._distance_right - self._distance_left ) / (2*self._l)
-                    msg = f""" total_change_angle: {total_change_angle}, target_radian {target_radian}"""
-                    rospy.loginfo(msg)
-                    if abs(total_change_angle) >= (abs(target_radian) - self._tolerance):
-                        stop = WheelsCmdStamped(vel_left=0, vel_right=0)
-                        self._publisher.publish(stop)
-                        break
-                    self._publisher.publish(message)
-                    rate.sleep()
-
-                msg = f""" total_change_angle: {total_change_angle}, target_radian {target_radian}"""
-                rospy.loginfo(msg)
-
-            else:
-                raise ValueError("task not recognized")
-            
-            time.sleep(5)
+            task.execute(self)
             
         rospy.signal_shutdown(reason="tasks complete")
     
     def on_shutdown(self):
-        stop = WheelsCmdStamped(vel_left=0, vel_right=0)
-        self._publisher.publish(stop)
+        Shutdown().execute(self)
 
-class RotateTask():
-    def __init__(self, radian):
+
+class Task():
+    def __init__(self, throttle=0, precision=0, tolerance=0, led_color=[0.0,1.0,0.0]):
+        self._throttle = throttle
+        self._precision = precision
+        self._tolerance = tolerance
+        self._led_color = led_color
+
+    def get_led_color(self):
+        return self._led_color
+    
+    def get_tolerance(self):
+        return self._tolerance
+    
+    def get_precision(self):
+        return self._precision
+    
+    def get_throttle(self):
+        return self._throttle
+    
+    def execute(self, dtros):
+        self.runTask(dtros)
+    
+    def runTask(self, dtros):
+        pass
+
+    def create_led_msg(self, colors):
+        led_msg = LEDPattern()
+
+        for i in range(5):
+            rgba = ColorRGBA()
+            rgba.r = colors[0]
+            rgba.g = colors[1]
+            rgba.b = colors[2]
+            rgba.a = 1.0
+            led_msg.rgb_vals.append(rgba)
+
+        return led_msg
+    
+    def add_header(self, message):
+        h = Header()
+        h.stamp = rospy.Time.now()
+        message.header = h
+
+
+class MoveTask(Task):
+    def __init__(self, throttle, precision, tolerance, led_color=[0.0,1.0,0.0]):
+        super().__init__(throttle, precision, tolerance, led_color)
+    
+    def execute(self, dtros):
+        state = "Moving"
+        dtros._state_publisher.publish(state)
+        self.runTask(dtros)
+
+class Stop(Task):
+    def __init__(self, throttle=0, precision=0, tolerance=0, stop_time=5, led_color=[1.0,0.0,0.0]):
+        super().__init__(throttle, precision, tolerance, led_color)
+        self._stop_time = stop_time
+    
+    def execute(self, dtros):
+        state = "Stopping"
+        dtros._state_publisher.publish(state)
+        self.runTask(dtros)
+
+    def runTask(self, dtros):
+        stop = WheelsCmdStamped(vel_left=0, vel_right=0)
+        self.add_header(stop)
+        dtros._publisher.publish(stop)
+        msg = f""" Led Color: {self._led_color}"""
+        rospy.loginfo(msg)
+        time.sleep(self._stop_time)
+
+class Shutdown(Task):
+    def __init__(self, throttle=0, precision=0, tolerance=0, led_color=[0.0,0.0,0.0]):
+        super().__init__(throttle, precision, tolerance, led_color)
+    
+    def execute(self, dtros):
+        stop = WheelsCmdStamped(vel_left=0, vel_right=0)
+        self.add_header(stop)
+        dtros._publisher.publish(stop)
+        state = "Exiting"
+        dtros._state_publisher.publish(state)
+
+class RotateTask(MoveTask):
+    def __init__(self, throttle=0.5, precision=50, tolerance=0.5, radian=-math.pi/2):
+        super().__init__(throttle, precision, tolerance)
         if radian > 2*math.pi or radian < -2*math.pi:
             raise ValueError("radian must be between 2pi and -2pi")
         
@@ -174,12 +175,44 @@ class RotateTask():
     def get_direction_of_left_wheel(self):
         return self._direction_left
     
-class CurveTask():
-    def __init__(self, R, target_radian):
+    def runTask(self, dtros):
+        dir_r_wheel = self.get_direction_of_right_wheel()
+        dir_l_wheel = self.get_direction_of_left_wheel()
+        target_radian = self.get_angle_rotation_radians()
+        throttle = self.get_throttle()
+        precision = self.get_precision()
+        tolerance = self.get_tolerance()
+
+        msg = f""" Running a rotate task ... target radian : {target_radian}"""
+        rospy.loginfo(msg)
+
+        msg = f""" Led Color: {self.get_led_color()}"""
+        rospy.loginfo(msg)
+
+        rate = rospy.Rate(precision)
+        message = WheelsCmdStamped(vel_left=throttle*dir_l_wheel, vel_right=throttle*dir_r_wheel)
+
+        while not rospy.is_shutdown():
+            total_change_angle = ( dtros._distance_right - dtros._distance_left ) / (2*dtros._l)
+            msg = f""" total_change_angle: {total_change_angle}, target_radian {target_radian}"""
+            rospy.loginfo(msg)
+            if abs(total_change_angle) >= (abs(target_radian) - tolerance):
+                break
+            self.add_header(message)
+            dtros._publisher.publish(message)
+            rate.sleep()
+
+        msg = f""" total_change_angle: {total_change_angle}, target_radian {target_radian}"""
+        rospy.loginfo(msg)
+    
+class CurveTask(MoveTask):
+    def __init__(self, throttle=0.8, precision=40, tolerance=0.04, R=0.29, target_radian=-math.pi/2, right_offset=0.25):
+        super().__init__(throttle, precision, tolerance)
         if target_radian > 2*math.pi or target_radian < -2*math.pi:
             raise ValueError("radian must be between 2pi and -2pi")
         self._R = R
         self._target_radian = target_radian
+        self._right_offset = right_offset
     
     def get_target_radian(self):
         return self._target_radian
@@ -187,29 +220,130 @@ class CurveTask():
     def get_R(self):
         return self._R
 
-class StraightTask():
-    def __init__(self, distance):
-        self._target_distance = distance
+    def get_right_offset(self):
+        return self._right_offset
     
+    def runTask(self, dtros):
+        target_radian = self.get_target_radian()
+        R = self.get_R()
+        right_offset = self.get_right_offset()
+        throttle = self.get_throttle()
+        precision = self.get_precision()
+        tolerance = self.get_tolerance()
+    
+        msg = f""" Running a curve task ... target_angle : {target_radian}, R: {R}, right_offset: {right_offset}, throttle:{throttle}, precision: {precision}, tolerance: {tolerance} """
+        rospy.loginfo(msg)
+
+        msg = f""" Led Color: {self.get_led_color()}"""
+        rospy.loginfo(msg)
+
+        rate = rospy.Rate(precision)
+        furthest_wheel = R + dtros._l
+        closest_wheel = R - dtros._l
+        distance_ratio = closest_wheel / furthest_wheel
+        msg = f""" Distance Ratio: {distance_ratio} """
+        rospy.loginfo(msg)
+        message = WheelsCmdStamped(vel_left=throttle*1, vel_right=throttle*(distance_ratio)-right_offset)
+
+        while not rospy.is_shutdown():
+            total_change_angle = ( dtros._distance_right - dtros._distance_left ) / (2*dtros._l)
+            msg = f""" total_change_angle: {total_change_angle}, target_radian {target_radian}"""
+            rospy.loginfo(msg)
+            if abs(total_change_angle) >= (abs(target_radian) - tolerance):
+                break
+
+            self.add_header(message)
+            dtros._publisher.publish(message)
+            rate.sleep()
+
+        msg = f""" total_change_angle: {total_change_angle}, target_radian {target_radian}"""
+        rospy.loginfo(msg)
+
+
+
+class StraightTask(MoveTask):
+    def __init__(self, throttle=0.8, precision=40, tolerance=0.1, distance=1.2, right_offset=0, left_offset=0):
+        super().__init__(throttle, precision, tolerance)
+        self._target_distance = distance
+        self._right_offset = right_offset
+        self._left_offset = left_offset
+
     def get_target_distance(self):
         return self._target_distance
+
+    def get_right_offset(self):
+        return self._right_offset
+
+    def get_left_offset(self):
+        return self._left_offset
+    
+    def runTask(self, dtros):
+        target_distance = self.get_target_distance()
+        throttle = self.get_throttle()
+        precision = self.get_precision()
+        tolerance = self.get_tolerance()
+        right_offset = self.get_right_offset()
+        left_offset = self.get_left_offset()
+
+        msg = f""" Running a straight task ... target distance {target_distance} """
+        rospy.loginfo(msg)
+
+        msg = f""" Led Color: {self.get_led_color()}"""
+        rospy.loginfo(msg)
+
+        rate = rospy.Rate(precision)
+        message = WheelsCmdStamped(vel_left=throttle*1+left_offset, vel_right=throttle*1+right_offset)
+
+        while not rospy.is_shutdown():
+            distance_so_far = ( dtros._distance_left + dtros._distance_right ) / 2
+            msg = f""" distance_so_far: {distance_so_far}, target_distance :{target_distance}"""
+            rospy.loginfo(msg)
+            if distance_so_far >= ( target_distance - tolerance ):
+                break
+
+            self.add_header(message)
+            dtros._publisher.publish(message)
+            rate.sleep()
+            msg = f""" distance_so_far: {distance_so_far}, target_distance :{target_distance}"""
+        rospy.loginfo(msg)
+
         
 if __name__ == "__main__":
+
+    # Calibration for this program
+    # baseline: 0.1
+    # calibration_time: 2025-02-11-18-05-50
+    # gain: 3.0
+    # k: 27.0
+    # limit: 1.0
+    # omega_max: 8.0
+    # radius: 0.0318
+    # trim: 0.2
+    # v_max: 1.0
+
     try:
-        precision = 80 # published messages per second
-        tolerance = 0.08 # accept total change in angle within tolerance
-        throttle = 0.8
+        straight_left_offset = 0.01
+        straight_throttle = 0.7
+        stop_time = 5
         tasks = [
-                StraightTask(1.2),
-                RotateTask(-math.pi/2), 
-                StraightTask(0.92), 
-                CurveTask(-0.29, -math.pi/2), 
-                StraightTask(0.61), 
-                CurveTask(-0.29, -math.pi/2), 
-                StraightTask(0.92),
-                RotateTask(-math.pi/2)]
-        # tasks = [StraightTask(1.2)]
-        node = DPATH(node_name="rotate_node", tasks=tasks, throttle=throttle, tolerance=tolerance, precision=precision)
+            StraightTask(throttle=0.5, precision=40, tolerance=0.1,distance=1.2, left_offset=0), 
+            # Stop(stop_time=stop_time),
+            # RotateTask(throttle=0.6, precision=40, tolerance=0.7, radian=-math.pi/2), 
+            # Stop(stop_time=stop_time),
+            # StraightTask(throttle=straight_throttle, precision=40, tolerance=0.1, distance=0.92, left_offset=0.03), 
+            # Stop(stop_time=stop_time),
+            # CurveTask(throttle=0.7, precision=40, tolerance=0.04, R=0.29, target_radian=-math.pi/2, right_offset=0.25), 
+            # Stop(stop_time=stop_time),
+            # StraightTask(throttle=straight_throttle, precision=40, tolerance=0.1, distance=0.61, left_offset=0.03), 
+            # Stop(stop_time=stop_time),
+            # CurveTask(throttle=0.8, precision=40, tolerance=0.04, R=0.29, target_radian=-math.pi/2, right_offset=0.25), 
+            # Stop(stop_time=stop_time),
+            # StraightTask(throttle=straight_throttle, precision=40, tolerance=0.1, distance=0.92, left_offset=0.03),
+            # Stop(stop_time=stop_time),
+            # RotateTask(throttle=0.7, precision=50, tolerance=0.1, radian=-math.pi/2),
+            # Stop(stop_time=stop_time),
+        ]
+        node = DPATH(node_name="rotate_node", tasks=tasks)
         node.run()
         rospy.spin()
     except rospy.ROSInterruptException:

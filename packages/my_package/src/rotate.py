@@ -30,7 +30,7 @@ class Rotate(DTROS):
 
         self._throttle = throttle
         
-        self._l = 0.0395
+        self._l = 0.05
 
         self._resolution = 135
 
