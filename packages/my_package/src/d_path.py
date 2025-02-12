@@ -324,24 +324,25 @@ if __name__ == "__main__":
     try:
         straight_left_offset = 0.01
         straight_throttle = 0.7
-        stop_time = 5
+        stop_time = 3
         tasks = [
+            Stop(stop_time=5),
             StraightTask(throttle=0.5, precision=40, tolerance=0.1,distance=1.2, left_offset=0), 
-            # Stop(stop_time=stop_time),
-            # RotateTask(throttle=0.6, precision=40, tolerance=0.7, radian=-math.pi/2), 
-            # Stop(stop_time=stop_time),
-            # StraightTask(throttle=straight_throttle, precision=40, tolerance=0.1, distance=0.92, left_offset=0.03), 
-            # Stop(stop_time=stop_time),
-            # CurveTask(throttle=0.7, precision=40, tolerance=0.04, R=0.29, target_radian=-math.pi/2, right_offset=0.25), 
-            # Stop(stop_time=stop_time),
-            # StraightTask(throttle=straight_throttle, precision=40, tolerance=0.1, distance=0.61, left_offset=0.03), 
-            # Stop(stop_time=stop_time),
-            # CurveTask(throttle=0.8, precision=40, tolerance=0.04, R=0.29, target_radian=-math.pi/2, right_offset=0.25), 
-            # Stop(stop_time=stop_time),
-            # StraightTask(throttle=straight_throttle, precision=40, tolerance=0.1, distance=0.92, left_offset=0.03),
-            # Stop(stop_time=stop_time),
-            # RotateTask(throttle=0.7, precision=50, tolerance=0.1, radian=-math.pi/2),
-            # Stop(stop_time=stop_time),
+            Stop(stop_time=stop_time),
+            RotateTask(throttle=0.5, precision=40, tolerance=0.2, radian=-math.pi/2), 
+            Stop(stop_time=stop_time),
+            StraightTask(throttle=straight_throttle, precision=40, tolerance=0.1, distance=0.92, left_offset=0.03), 
+            Stop(stop_time=stop_time),
+            CurveTask(throttle=0.7, precision=40, tolerance=0.04, R=0.29, target_radian=-math.pi/2, right_offset=0.25), 
+            Stop(stop_time=stop_time),
+            StraightTask(throttle=straight_throttle, precision=40, tolerance=0.1, distance=0.61, left_offset=0.03), 
+            Stop(stop_time=stop_time),
+            CurveTask(throttle=0.8, precision=40, tolerance=0.04, R=0.29, target_radian=-math.pi/2, right_offset=0.25), 
+            Stop(stop_time=stop_time),
+            StraightTask(throttle=straight_throttle, precision=40, tolerance=0.1, distance=0.92, left_offset=0.03),
+            Stop(stop_time=stop_time),
+            RotateTask(throttle=0.5, precision=50, tolerance=0.2, radian=-math.pi/2),
+            Stop(stop_time=5),
         ]
         node = DPATH(node_name="rotate_node", tasks=tasks)
         node.run()
