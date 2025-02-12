@@ -41,6 +41,8 @@ class DPATH(DTROS):
 
         self._tasks = tasks
 
+        self._start = rospy.Time.now()
+
     def callback_left(self, data):
         if self._ticks_left is None:
             self._ticks_left = data.data
@@ -71,6 +73,9 @@ class DPATH(DTROS):
         rospy.signal_shutdown(reason="tasks complete")
     
     def on_shutdown(self):
+        self._end = rospy.Time.now()
+        duration = (self._end - self._start).to_sec()
+        rospy.loginfo(f"Execution time: {duration}")
         Shutdown().execute(self)
 
 
