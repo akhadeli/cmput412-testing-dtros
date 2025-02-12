@@ -35,15 +35,13 @@ def plot(filename, robot_name):
                                         [0], 
                                         [(radius * (vel_right - vel_left)) / baseline]])
         
-        theta += change_robot_frame[2, 0]*dt
-        # theta = theta % (2*np.pi)
+        theta += (change_robot_frame[2, 0]*dt)
         
         change_in_xi_world_frame = np.array([[np.cos(theta), -np.sin(theta), 0], 
                                        [np.sin(theta), np.cos(theta), 0], 
                                        [0, 0, 1]]) @ change_robot_frame
         
         xi_world_frame += change_in_xi_world_frame*dt
-        print(xi_world_frame[0, 0], xi_world_frame[1, 0])
         
         x_world_values.append(xi_world_frame[0, 0])
         y_world_values.append(xi_world_frame[1, 0])

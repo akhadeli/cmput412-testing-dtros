@@ -329,7 +329,7 @@ if __name__ == "__main__":
             Stop(stop_time=5),
             StraightTask(throttle=0.5, precision=40, tolerance=0.1,distance=1.2, left_offset=0), 
             Stop(stop_time=stop_time),
-            RotateTask(throttle=0.5, precision=40, tolerance=0.2, radian=-math.pi/2), 
+            RotateTask(throttle=0.4, precision=40, tolerance=0.4, radian=-math.pi/2), 
             Stop(stop_time=stop_time),
             StraightTask(throttle=straight_throttle, precision=40, tolerance=0.1, distance=0.92, left_offset=0.03), 
             Stop(stop_time=stop_time),
@@ -341,7 +341,7 @@ if __name__ == "__main__":
             Stop(stop_time=stop_time),
             StraightTask(throttle=straight_throttle, precision=40, tolerance=0.1, distance=0.92, left_offset=0.03),
             Stop(stop_time=stop_time),
-            RotateTask(throttle=0.5, precision=50, tolerance=0.2, radian=-math.pi/2),
+            RotateTask(throttle=0.4, precision=50, tolerance=0.4, radian=-math.pi/2),
             Stop(stop_time=5),
         ]
         node = DPATH(node_name="rotate_node", tasks=tasks)
