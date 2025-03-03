@@ -6,7 +6,7 @@ source /environment.sh
 dt-launchfile-init
 
 # launch subscriber
-rosrun my_package wheel_control.py
+rosrun my_package wheel_control_node.py
 
 # wait for app to end
 dt-launchfile-join

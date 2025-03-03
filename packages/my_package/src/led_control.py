@@ -15,6 +15,7 @@ class Colors(Enum):
     Teal = [0.0, 1.0, 1.0]
     Magenta = [1.0, 0.0, 1.0]
     Off = [0.0, 0.0, 0.0]
+    DarkOrange = [1.0, 0.55, 0]
 
 class State():
     def __init__(self, message_name, colorPattern):
@@ -62,10 +63,10 @@ class LEDControl(DTROS):
         self.sub = rospy.Subscriber(state_topic, String, self.callback)
         self._led_publisher = rospy.Publisher(f'/{self._vehicle_name}/led_emitter_node/led_pattern', LEDPattern, queue_size=10)
         self.states = [
-            State(message_name="Moving", colorPattern=ColorPattern(frontLeft=Colors.Green, frontRight=Colors.Green, backLeft=Colors.Green, backRight=Colors.Green)),
+            State(message_name="Moving Straight", colorPattern=ColorPattern(frontLeft=Colors.Green, frontRight=Colors.Green, backLeft=Colors.Green, backRight=Colors.Green)),
             State(message_name="Stopping", colorPattern=ColorPattern(frontLeft=Colors.Red, frontRight=Colors.Red, backLeft=Colors.Red, backRight=Colors.Red)),
-            State(message_name="Turning Right", colorPattern=ColorPattern(frontLeft=Colors.Off, frontRight=Colors.Yellow, backLeft=Colors.Off, backRight=Colors.Yellow)),
-            State(message_name="Turning Left", colorPattern=ColorPattern(frontLeft=Colors.Yellow, frontRight=Colors.Off, backLeft=Colors.Yellow, backRight=Colors.Off)),
+            State(message_name="Turning Right", colorPattern=ColorPattern(frontLeft=Colors.Off, frontRight=Colors.DarkOrange, backLeft=Colors.Off, backRight=Colors.DarkOrange)),
+            State(message_name="Turning Left", colorPattern=ColorPattern(frontLeft=Colors.DarkOrange, frontRight=Colors.Off, backLeft=Colors.DarkOrange, backRight=Colors.Off)),
         ]
 
     def callback(self, data):
