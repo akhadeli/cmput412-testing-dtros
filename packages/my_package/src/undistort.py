@@ -54,7 +54,7 @@ class Undistort(DTROS):
         self._publisher.publish(self._bridge.cv2_to_compressed_imgmsg(undistorted))
 
         # display frame
-        cv2.imshow(self._window, image)
+        cv2.imshow(self._window, undistorted)
 
         cv2.waitKey(1)
 
