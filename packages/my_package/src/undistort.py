@@ -51,6 +51,11 @@ class Undistort(DTROS):
         x, y, w, h = roi
         undistorted = undistorted[y:y+h, x:x+w]
 
+        h, w, _ = undistorted.shape
+        point = [224, 191]
+        print(point)
+        cv2.circle(undistorted, tuple(point), 5, (0, 0, 255), -1)  # Red dots
+
         self._publisher.publish(self._bridge.cv2_to_compressed_imgmsg(undistorted))
 
         # display frame

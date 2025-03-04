@@ -11,7 +11,7 @@ from cv_bridge import CvBridge
 
 class PIDController(DTROS):
 
-    def __init__(self, node_name, proportional_gain=0.0000002, derivative_gain=0.0000002, integral_gain=0, velocity=0.3, integral_saturation=500000):
+    def __init__(self, node_name, proportional_gain=0.0000002, derivative_gain=0.0000002, integral_gain=0.0000002, velocity=0.3, integral_saturation=500000):
         # initialize the DTROS parent class
         super(PIDController, self).__init__(node_name=node_name, node_type=NodeType.GENERIC)
         # static parameters
@@ -75,7 +75,7 @@ class PIDController(DTROS):
         upper_yellow = np.array([35, 255, 255], dtype=np.uint8)
         mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
 
-        self._error = self.compute_error(mask_yellow=mask_yellow, target_x=100, pixel_value=1) + self.compute_error(mask_yellow=mask_white, target_x=489)
+        self._error = self.compute_error(mask=mask_yellow, target_x=100, pixel_value=1) + self.compute_error(mask=mask_white, target_x=489)
         print(self._error)
 
         # # Display all images in separate windows
@@ -113,7 +113,7 @@ class PIDController(DTROS):
 
         return P + I + D
     
-    def compute_error(self, mask_yellow, target_x=100, pixel_value=1):
+    def compute_error(self, mask, target_x=100, pixel_value=1):
         """
         Computes the sum of errors between detected yellow lane pixels and the expected lane position at x=100.
         
@@ -125,7 +125,7 @@ class PIDController(DTROS):
             float: The sum of errors between detected lane pixels and the expected position at x=100.
         """
         # Find nonzero (active) pixel coordinates
-        y_coords, x_coords = np.where(mask_yellow > 0)  # y, x positions of active pixels
+        y_coords, x_coords = np.where(mask > 0)  # y, x positions of active pixels
         
         if len(x_coords) == 0:
             return 0  # No detected yellow pixels, return 0 error
