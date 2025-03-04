@@ -6,7 +6,7 @@ source /environment.sh
 dt-launchfile-init
 
 # launch publisher
-rosrun my_package lane_following.py
+rosrun my_package pid_controller.py
 
 # wait for app to end
 dt-launchfile-join

@@ -1,21 +1,19 @@
 #!/usr/bin/env python3
 
 import os
-
 import numpy as np
 import rospy
 from duckietown.dtros import DTROS, NodeType
 from sensor_msgs.msg import CompressedImage
 from duckietown_msgs.msg import WheelsCmdStamped
-
 import cv2
 from cv_bridge import CvBridge
 
-class LaneFollowing(DTROS):
+class PIDController(DTROS):
 
-    def __init__(self, node_name):
+    def __init__(self, node_name, proportional_gain=0.0000002, derivative_gain=0.0000002, integral_gain=0, velocity=0.3, integral_saturation=500000):
         # initialize the DTROS parent class
-        super(LaneFollowing, self).__init__(node_name=node_name, node_type=NodeType.VISUALIZATION)
+        super(PIDController, self).__init__(node_name=node_name, node_type=NodeType.GENERIC)
         # static parameters
         self._vehicle_name = os.environ['VEHICLE_NAME']
         self._camera_topic = f"/{self._vehicle_name}/camera_node/undistorted_image/compressed"
@@ -27,11 +25,15 @@ class LaneFollowing(DTROS):
         # construct subscriber
         self.sub = rospy.Subscriber(self._camera_topic, CompressedImage, self.callback)
 
-        self.proportional_gain = 0.0000002
-        # self.proportional_gain = 0
-        self.vel = 0.3
+        self.proportional_gain = proportional_gain
+        self.derivate_gain = derivative_gain
+        self.integral_gain = integral_gain
+        self.vel = velocity
+        self.integral_saturation = integral_saturation
 
-        self._error = 1
+        self._error = 20
+        self._error_last = self._error
+        self._integration_stored = 0
 
     def callback(self, msg):
         # convert JPEG bytes to CV image
@@ -86,17 +88,30 @@ class LaneFollowing(DTROS):
     def run(self):
         rate = rospy.Rate(10)
         while not rospy.is_shutdown():
-            if self._error < 0:
-                message = WheelsCmdStamped(vel_left=self.vel, vel_right=self.vel+abs(self._error)*self.proportional_gain)
-            elif self._error > 0:
-                message = WheelsCmdStamped(vel_left=self.vel+abs(self._error)*self.proportional_gain, vel_right=self.vel)
+            correctionUpdate = self.getUpdate()
+        
+            if correctionUpdate < 0:
+                message = WheelsCmdStamped(vel_left=self.vel, vel_right=self.vel+abs(correctionUpdate))
+            elif correctionUpdate > 0:
+                message = WheelsCmdStamped(vel_left=self.vel+abs(correctionUpdate), vel_right=self.vel)
             else:
                 message = WheelsCmdStamped(vel_left=self.vel, vel_right=self.vel)
+            
             self._publisher.publish(message)
+            
             rate.sleep()
+    
+    def getUpdate(self):
+        P = self._error*self.proportional_gain
+        errorRateOfChange = self._error - self._error_last
+        D = self.derivate_gain * errorRateOfChange
+        integration_stored_update = self._integration_stored + (self._error)
+        self._integration_stored = (integration_stored_update) if abs(integration_stored_update) <= self.integral_saturation else (integration_stored_update/integration_stored_update)*self.integral_saturation
+        I = self.integral_gain * self._integration_stored
 
-        
-        # cv2.waitKey(1)
+        self._error_last = self._error
+
+        return P + I + D
     
     def compute_error(self, mask_yellow, target_x=100, pixel_value=1):
         """
@@ -127,7 +142,7 @@ class LaneFollowing(DTROS):
 
 if __name__ == '__main__':
     # create the node
-    node = LaneFollowing(node_name='lane_following')
+    node = PIDController(node_name="PID_controller_node", proportional_gain=0.0000002, derivative_gain=0.0000002, integral_gain=0.0000002, velocity=0.3, integral_saturation=500000)
     node.run()
     # keep spinning
     rospy.spin()
