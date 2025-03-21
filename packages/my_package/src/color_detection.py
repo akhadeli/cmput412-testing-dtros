@@ -26,9 +26,6 @@ class ColorDetection(DTROS):
         self._green_detection_topic = f"/{self._vehicle_name}/camera_node/green_image_mask/compressed"
         self._green_publisher = rospy.Publisher(self._green_detection_topic, CompressedImage)
 
-        self._green_detection_topic = f"/{self._vehicle_name}/camera_node/green_image_mask/compressed"
-        self._green_publisher = rospy.Publisher(self._green_detection_topic, CompressedImage)
-
         self._undistorted_topic = f"/{self._vehicle_name}/camera_node/undistorted_image/compressed"
         self.sub = rospy.Subscriber(self._undistorted_topic, CompressedImage, self.callback)
 
