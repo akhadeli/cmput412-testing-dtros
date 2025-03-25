@@ -35,6 +35,14 @@ class PIDController(DTROS):
         self._error_last = self._error
         self._integration_stored = 0
 
+        self._duckie_detected = False
+        self._crosswalk_detected = False
+        self._lane_flip_flag = False
+        self._counter = 0
+        self._stop_counter = 0
+        self._duckie_threshold = 30
+        self._duckie_stop = 30
+
         self._blue_detection_topic = f"/{self._vehicle_name}/camera_node/blue_image_mask/compressed"
         self.blue_mask_sub = rospy.Subscriber(self._blue_detection_topic , CompressedImage, self.blue_detection_callback)
     
@@ -46,7 +54,7 @@ class PIDController(DTROS):
         y_coords, x_coords = np.where(mask_blue > 0)  # y, x positions of active pixels
 
         if len(x_coords) == 0:
-            print("No blue pixels detected")
+            # print("Detecting nothing")
             return
 
         # Calculate the variance of the x coordinates
@@ -55,13 +63,21 @@ class PIDController(DTROS):
         # Calculate the magnitude (number of active blue pixels)
         magnitude = len(x_coords)
 
-        if (magnitude >= 8000):
+        # print("Magnitude : " + str(magnitude) + ", Variance : " + str(x_variance))
+
+        if (magnitude >= 5000):
             if(x_variance > 10000):
                 print("Detecting crosswalk")
+                self._crosswalk_detected = True
+                self._duckie_detected = False
             else:
                 print("Detecting duckiebot")
+                self._duckie_detected = True
+                self._crosswalk_detected = False
         else:
             print("Detecting nothing")
+            self._duckie_detected = False
+            self._crosswalk_detected = False
 
 
         # Print the variance and magnitude
@@ -108,8 +124,15 @@ class PIDController(DTROS):
         lower_yellow = np.array([15, 100, 100], dtype=np.uint8)
         upper_yellow = np.array([35, 255, 255], dtype=np.uint8)
         mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
+        
+        if (not self._lane_flip_flag):
+            yellow_error = self.compute_error(mask=mask_yellow, target_x=100)
+            white_error = self.compute_error(mask=mask_white, target_x=489)
+        else:
+            yellow_error = self.compute_error(mask=mask_yellow, target_x=489)
+            white_error = self.compute_error(mask=mask_white, target_x=100)
 
-        self._error = self.compute_error(mask=mask_yellow, target_x=100, pixel_value=1) + self.compute_error(mask=mask_white, target_x=489)
+        self._error = yellow_error + white_error
         # print(self._error)
 
         

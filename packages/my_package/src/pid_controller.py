@@ -8,6 +8,7 @@ from sensor_msgs.msg import CompressedImage
 from duckietown_msgs.msg import WheelsCmdStamped
 import cv2
 from cv_bridge import CvBridge
+import time
 
 class PIDController(DTROS):
 
@@ -34,6 +35,44 @@ class PIDController(DTROS):
         self._error = 20
         self._error_last = self._error
         self._integration_stored = 0
+
+        self._blue_detection_topic = f"/{self._vehicle_name}/camera_node/blue_image_mask/compressed"
+        self.blue_mask_sub = rospy.Subscriber(self._blue_detection_topic , CompressedImage, self.blue_detection_callback)
+    
+    def blue_detection_callback(self, msg):
+        # msg is already a mask
+        mask_blue = self._bridge.compressed_imgmsg_to_cv2(msg)
+
+        # Find the coordinates of active (non-zero) pixels
+        y_coords, x_coords = np.where(mask_blue > 0)  # y, x positions of active pixels
+
+        if len(x_coords) == 0:
+            # print("Detecting nothing")
+            return
+
+        # Calculate the variance of the x coordinates
+        x_variance = np.var(x_coords)
+
+        # Calculate the magnitude (number of active blue pixels)
+        magnitude = len(x_coords)
+
+        # print("Magnitude : " + str(magnitude) + ", Variance : " + str(x_variance))
+
+        if (magnitude >= 5000):
+            if(x_variance > 10000):
+                print("Detecting crosswalk")
+                self._crosswalk_detected = True
+                self._duckie_detected = False
+            else:
+                print("Detecting duckiebot")
+                self._duckie_detected = True
+                self._crosswalk_detected = False
+        else:
+            print("Detecting nothing")
+            self._duckie_detected = False
+            self._crosswalk_detected = False
+        
+        
 
     def callback(self, msg):
         # convert JPEG bytes to CV image
@@ -75,8 +114,21 @@ class PIDController(DTROS):
         upper_yellow = np.array([35, 255, 255], dtype=np.uint8)
         mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
 
-        self._error = self.compute_error(mask=mask_yellow, target_x=100, pixel_value=1) + self.compute_error(mask=mask_white, target_x=489)
-        print(self._error)
+        # if not self._duckie_detected:
+        #     yellow_error = self.compute_error(mask=mask_yellow, target_x=100)
+        #     white_error = self.compute_error(mask=mask_white, target_x=489)
+        # else:
+        
+        yellow_error = self.compute_error(mask=mask_yellow, target_x=100)
+        white_error = self.compute_error(mask=mask_white, target_x=489)
+
+        if yellow_error > 100000 and white_error < -100000:
+            self._error = yellow_error + abs(white_error) 
+
+        elif yellow_error < -100000 and white_error > 100000:
+            self._error = yellow_error + -1*white_error
+        else:
+            self._error = yellow_error + white_error
 
         # # Display all images in separate windows
         # cv2.imshow("Before (Original Image)", image)  # Original image with source points
@@ -98,7 +150,6 @@ class PIDController(DTROS):
                 message = WheelsCmdStamped(vel_left=self.vel, vel_right=self.vel)
             
             self._publisher.publish(message)
-            
             rate.sleep()
     
     def getUpdate(self):
