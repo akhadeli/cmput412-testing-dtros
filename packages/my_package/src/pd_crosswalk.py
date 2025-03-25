@@ -8,12 +8,13 @@ from sensor_msgs.msg import CompressedImage
 from duckietown_msgs.msg import WheelsCmdStamped
 import cv2
 from cv_bridge import CvBridge
+import time
 
-class PIDController(DTROS):
+class RightDrivingVehicleAvoidance(DTROS):
 
-    def __init__(self, node_name, proportional_gain=0.0000002, derivative_gain=0.0000002, integral_gain=0.0000002, velocity=0.3, integral_saturation=500000):
+    def __init__(self, node_name, proportional_gain=0.0000002, derivative_gain=0.0000002, integral_gain=0.0000002, velocity=0.3, integral_saturation=500000, duckie_detection_sensitivity=2000, duckie_detection_distance=50000, lane_correction_delay=2):
         # initialize the DTROS parent class
-        super(PIDController, self).__init__(node_name=node_name, node_type=NodeType.GENERIC)
+        super(RightDrivingVehicleAvoidance, self).__init__(node_name=node_name, node_type=NodeType.GENERIC)
         # static parameters
         self._vehicle_name = os.environ['VEHICLE_NAME']
         self._camera_topic = f"/{self._vehicle_name}/camera_node/undistorted_image/compressed"
@@ -35,6 +36,44 @@ class PIDController(DTROS):
         self._error_last = self._error
         self._integration_stored = 0
 
+        self._blue_detection_topic = f"/{self._vehicle_name}/camera_node/blue_image_mask/compressed"
+        self.blue_mask_sub = rospy.Subscriber(self._blue_detection_topic , CompressedImage, self.blue_detection_callback)
+
+        self._duckie_detected = False
+        self._duckie_not_detected_time_stamp = time.time()
+
+        self.duckie_detection_sensitivity = duckie_detection_sensitivity
+        self.duckie_detection_distance = duckie_detection_distance
+
+        self.lane_correction_delay = lane_correction_delay
+    
+    def blue_detection_callback(self, msg):
+        # msg is already a mask
+        mask_blue = self._bridge.compressed_imgmsg_to_cv2(msg)
+
+        # Find the coordinates of active (non-zero) pixels
+        y_coords, x_coords = np.where(mask_blue > 0)  # y, x positions of active pixels
+
+        if len(x_coords) == 0:
+            # print("Detecting nothing")
+            return
+
+        # Calculate the variance of the x coordinates
+        x_variance = np.var(x_coords)
+
+        # Calculate the magnitude (number of active blue pixels)
+        magnitude = len(x_coords)
+
+        # print("Magnitude : " + str(magnitude) + ", Variance : " + str(x_variance))
+
+        if (magnitude >= self.duckie_detection_sensitivity):
+            if(x_variance <= self.duckie_detection_distance):
+                self._duckie_detected = True
+                return
+        if self._duckie_detected == True:
+            self._duckie_detected = False
+            self._duckie_not_detected_time_stamp = time.time()
+        
     def callback(self, msg):
         # convert JPEG bytes to CV image
         image = self._bridge.compressed_imgmsg_to_cv2(msg)
@@ -75,15 +114,22 @@ class PIDController(DTROS):
         upper_yellow = np.array([35, 255, 255], dtype=np.uint8)
         mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
 
-        self._error = self.compute_error(mask=mask_yellow, target_x=100, pixel_value=1) + self.compute_error(mask=mask_white, target_x=489)
-        print(self._error)
+        if not self._duckie_detected and (time.time() - self._duckie_not_detected_time_stamp) >= self.lane_correction_delay:
+            print("Switching to right lane")
+            yellow_error = self.compute_error(mask=mask_yellow, target_x=100)
+            white_error = self.compute_error(mask=mask_white, target_x=489)
+        else:
+            print("Switching to left lane")
+            yellow_error = self.compute_error(mask=mask_yellow, target_x=489)
+            white_error = self.compute_error(mask=mask_white, target_x=100)
 
-        # # Display all images in separate windows
-        # cv2.imshow("Before (Original Image)", image)  # Original image with source points
-        # cv2.imshow("After (Warped Image)", warped)    # Warped image
-        # # cv2.imshow("White Lane Detection", mask_white)  # White mask
-        # # cv2.imshow("Yellow Lane Detection", mask_yellow)  # Yellow mask
-        # cv2.waitKey(1)
+        if yellow_error > 100000 and white_error < -100000:
+            self._error = (yellow_error + abs(white_error)) 
+        elif yellow_error < -100000 and white_error > 100000:
+            self._error = (yellow_error + -1*white_error) 
+        else:
+            self._error = yellow_error + white_error
+
     
     def run(self):
         rate = rospy.Rate(10)
@@ -98,7 +144,6 @@ class PIDController(DTROS):
                 message = WheelsCmdStamped(vel_left=self.vel, vel_right=self.vel)
             
             self._publisher.publish(message)
-            
             rate.sleep()
     
     def getUpdate(self):
@@ -142,7 +187,7 @@ class PIDController(DTROS):
 
 if __name__ == '__main__':
     # create the node
-    node = PIDController(node_name="PID_controller_node", proportional_gain=0.0000002, derivative_gain=0.0000002, integral_gain=0.0000002, velocity=0.3, integral_saturation=500000)
+    node = RightDrivingVehicleAvoidance(node_name="PID_controller_node", proportional_gain=0.0000002, derivative_gain=0.0000002, integral_gain=0.0000002, velocity=0.3, integral_saturation=500000, duckie_detection_sensitivity=2000, duckie_detection_distance=30000, lane_correction_delay=2)
     node.run()
     # keep spinning
     rospy.spin()
