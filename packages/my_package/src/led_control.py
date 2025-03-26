@@ -63,22 +63,35 @@ class LEDControl(DTROS):
         self.sub = rospy.Subscriber(state_topic, String, self.callback)
         self._led_publisher = rospy.Publisher(f'/{self._vehicle_name}/led_emitter_node/led_pattern', LEDPattern, queue_size=10)
         self.states = [
+            State(message_name="No tag detected", colorPattern=ColorPattern(frontLeft=Colors.Off, frontRight=Colors.Off, backLeft=Colors.Off, backRight=Colors.Off)),
+            State(message_name="INTERSECTIONT tag detected", colorPattern=ColorPattern(frontLeft=Colors.Blue, frontRight=Colors.Blue, backLeft=Colors.Blue, backRight=Colors.Blue)),
+            State(message_name="STOP tag detected", colorPattern=ColorPattern(frontLeft=Colors.Red, frontRight=Colors.Red, backLeft=Colors.Red, backRight=Colors.Red)),
+            State(message_name="UALBERTA tag detected", colorPattern=ColorPattern(frontLeft=Colors.Green, frontRight=Colors.Green, backLeft=Colors.Green, backRight=Colors.Green)),
             State(message_name="Moving Straight", colorPattern=ColorPattern(frontLeft=Colors.Green, frontRight=Colors.Green, backLeft=Colors.Green, backRight=Colors.Green)),
             State(message_name="Stopping", colorPattern=ColorPattern(frontLeft=Colors.Red, frontRight=Colors.Red, backLeft=Colors.Red, backRight=Colors.Red)),
             State(message_name="Turning Right", colorPattern=ColorPattern(frontLeft=Colors.Off, frontRight=Colors.DarkOrange, backLeft=Colors.Off, backRight=Colors.DarkOrange)),
             State(message_name="Turning Left", colorPattern=ColorPattern(frontLeft=Colors.DarkOrange, frontRight=Colors.Off, backLeft=Colors.DarkOrange, backRight=Colors.Off)),
         ]
+        self._current_state = None
 
     def callback(self, data):
-        for state in self.states:
-            if state.message_name == data.data:
-                self._led_publisher.publish(state.getLedMessage())
-                break
+        self._current_state = data.data
         rospy.loginfo("I heard '%s'", data.data)
+
+    def run(self):
+        rate = rospy.Rate(10)
+        while not rospy.is_shutdown():
+            for state in self.states:
+                if self._current_state is not None and state.message_name == self._current_state:
+                    self._led_publisher.publish(state.getLedMessage())
+                    break
+            rate.sleep()
+
 
 
 if __name__ == '__main__':
     # create the node
     node = LEDControl(node_name='led_control_node')
+    node.run()
     # keep spinning
     rospy.spin()

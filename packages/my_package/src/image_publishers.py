@@ -42,6 +42,9 @@ class ImagePublishers(DTROS):
         self._homography_blue_detection_topic = f"/{self._vehicle_name}/camera_node/homography_blue_mask/compressed"
         self._homography_blue_detection_publisher = rospy.Publisher(self._homography_blue_detection_topic, CompressedImage)
 
+        self._undistort_gray_topic = f"/{self._vehicle_name}/camera_node/undistort_gray/compressed"
+        self._undistort_gray_publisher = rospy.Publisher(self._undistort_gray_topic, CompressedImage)
+
         # Publishers need to be set first 
         self._camera_topic = f"/{self._vehicle_name}/camera_node/image/compressed"
         self._camera_sub = rospy.Subscriber(self._camera_topic, CompressedImage, self.callback)
@@ -80,6 +83,12 @@ class ImagePublishers(DTROS):
         homography = self.publish_homography(undistorted)
         self.publish_homography_yellow_mask(homography)
         self.publish_homography_blue_mask(homography)
+        self.publish_undistort_grayscale(undistorted)
+
+    def publish_undistort_grayscale(self, undistort):
+        image = undistort
+        grayscale_image = cv2.cvtColor(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)
+        self._undistort_gray_publisher.publish(self._bridge.cv2_to_compressed_imgmsg(grayscale_image))
 
     def publish_homography_blue_mask(self, homography):
         # Convert warped image to HSV for color detection

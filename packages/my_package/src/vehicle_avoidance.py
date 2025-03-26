@@ -10,11 +10,11 @@ import cv2
 from cv_bridge import CvBridge
 import time
 
-class RightDrivingVehicleAvoidance(DTROS):
+class VehicleAvoidanceMain(DTROS):
 
-    def __init__(self, node_name, proportional_gain=0.0000002, derivative_gain=0.0000002, integral_gain=0.0000002, velocity=0.3, integral_saturation=500000, duckie_detection_sensitivity=2000, duckie_detection_distance=50000, lane_correction_delay=2):
+    def __init__(self, node_name, tasks, loopTasks, proportional_gain=0.0000002, derivative_gain=0.0000002, integral_gain=0.0000002, velocity=0.3, integral_saturation=500000, duckie_detection_sensitivity=2000, duckie_detection_distance=50000, lane_correction_delay=2):
         # initialize the DTROS parent class
-        super(RightDrivingVehicleAvoidance, self).__init__(node_name=node_name, node_type=NodeType.GENERIC)
+        super(VehicleAvoidanceMain, self).__init__(node_name=node_name, node_type=NodeType.GENERIC)
         # static parameters
         self._vehicle_name = os.environ['VEHICLE_NAME']
         self._camera_topic = f"/{self._vehicle_name}/camera_node/undistorted_image/compressed"
@@ -46,6 +46,9 @@ class RightDrivingVehicleAvoidance(DTROS):
         self.duckie_detection_distance = duckie_detection_distance
 
         self.lane_correction_delay = lane_correction_delay
+
+        self._tasks = tasks
+        self._loop_tasks = loopTasks
     
     def blue_detection_callback(self, msg):
         # msg is already a mask
@@ -112,12 +115,10 @@ class RightDrivingVehicleAvoidance(DTROS):
         upper_yellow = np.array([35, 255, 255], dtype=np.uint8)
         mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
 
-        if self._duckie_detected and self._duckie_detected_time_stamp != None and (time.time() - self._duckie_detected_time_stamp) < self.lane_correction_delay:
-            print("Target : left lane")
+        if self._duckie_detected and self._duckie_detected_time_stamp is not None and (time.time() - self._duckie_detected_time_stamp) < self.lane_correction_delay:
             yellow_error = self.compute_error(mask=mask_yellow, target_x=489)
             white_error = self.compute_error(mask=mask_white, target_x=100)
         else:
-            print("Target : right lane")
             yellow_error = self.compute_error(mask=mask_yellow, target_x=100)
             white_error = self.compute_error(mask=mask_white, target_x=489)
             
@@ -132,22 +133,23 @@ class RightDrivingVehicleAvoidance(DTROS):
 
     
     def run(self):
-        rate = rospy.Rate(10)
+        if self._loop_tasks == True:
+            counter = 0
+            while not rospy.is_shutdown():
+                self._distance_right = 0
+                self._distance_left = 0
+                self._tasks[counter%len(self._tasks)].execute(self)
+                counter+=1
+        else:
+            for task in self._tasks:
+                
+                self._distance_right = 0
+                self._distance_left = 0
 
-        stop_time_stamp = None
-
-        while not rospy.is_shutdown():
-            correctionUpdate = self.getUpdate()
-            if correctionUpdate < 0:
-                message = WheelsCmdStamped(vel_left=self.vel, vel_right=self.vel+abs(correctionUpdate))
-            elif correctionUpdate > 0:
-                message = WheelsCmdStamped(vel_left=self.vel+abs(correctionUpdate), vel_right=self.vel)
-            else:
-                message = WheelsCmdStamped(vel_left=self.vel, vel_right=self.vel)
+                task.execute(self)
             
-            self._publisher.publish(message)
-            rate.sleep()
-    
+        rospy.signal_shutdown(reason="tasks complete")
+
     def getUpdate(self):
         P = self._error*self.proportional_gain
         errorRateOfChange = self._error - self._error_last
@@ -187,9 +189,78 @@ class RightDrivingVehicleAvoidance(DTROS):
         stop = WheelsCmdStamped(vel_left=0, vel_right=0)
         self._publisher.publish(stop)
 
+
+class VehicleAvoidanceTask():
+    def execute(self, dtros):
+        self.runTask(dtros)
+    
+    def runTask(self, dtros):
+        raise Exception("runTask must be overriden for all classes inheriting Task")
+
+class Stop(VehicleAvoidanceTask):
+    def __init__(self, stop_time=3):
+        super().__init__()
+        self._stop_time = stop_time
+    
+    def runTask(self, dtros):
+        print("Stopping")
+        stop = WheelsCmdStamped(vel_left=0, vel_right=0)
+        dtros._publisher.publish(stop)
+        time.sleep(self._stop_time)
+    
+class VehicleAvoidance(VehicleAvoidanceTask):
+    def runTask(self, dtros):
+        print("VehicleAvoidance")
+        rate = rospy.Rate(10)
+
+        while not rospy.is_shutdown():
+            correctionUpdate = dtros.getUpdate()
+
+            if(dtros._duckie_detected_time_stamp is not None and (time.time() - dtros._duckie_detected_time_stamp) < dtros.lane_correction_delay):
+                print("Duckie Detected")
+                break
+
+            if correctionUpdate < 0:
+                message = WheelsCmdStamped(vel_left=dtros.vel, vel_right=dtros.vel+abs(correctionUpdate))
+            elif correctionUpdate > 0:
+                message = WheelsCmdStamped(vel_left=dtros.vel+abs(correctionUpdate), vel_right=dtros.vel)
+            else:
+                message = WheelsCmdStamped(vel_left=dtros.vel, vel_right=dtros.vel)
+            
+            dtros._publisher.publish(message)
+            rate.sleep()
+
+class SwitchToLeftLane(VehicleAvoidanceTask):
+    def runTask(self, dtros):
+        print("SwitchToLeftLane")
+        rate = rospy.Rate(10)
+
+        while not rospy.is_shutdown():
+            correctionUpdate = dtros.getUpdate()
+
+            if dtros._duckie_detected_time_stamp is not None and (time.time() - dtros._duckie_detected_time_stamp) >= dtros.lane_correction_delay:
+                break 
+
+            if correctionUpdate < 0:
+                message = WheelsCmdStamped(vel_left=dtros.vel, vel_right=dtros.vel+abs(correctionUpdate))
+            elif correctionUpdate > 0:
+                message = WheelsCmdStamped(vel_left=dtros.vel+abs(correctionUpdate), vel_right=dtros.vel)
+            else:
+                message = WheelsCmdStamped(vel_left=dtros.vel, vel_right=dtros.vel)
+            
+            dtros._publisher.publish(message)
+
+            rate.sleep()
+
+
 if __name__ == '__main__':
+    tasks = [
+        VehicleAvoidance(),
+        Stop(stop_time=3),
+        SwitchToLeftLane()
+    ]
     # create the node
-    node = RightDrivingVehicleAvoidance(node_name="PID_controller_node", proportional_gain=0.0000002, derivative_gain=0.0000002, integral_gain=0.0000002, velocity=0.3, integral_saturation=500000, duckie_detection_sensitivity=2000, duckie_detection_distance=30000, lane_correction_delay=2)
+    node = VehicleAvoidanceMain(node_name="PID_controller_node", tasks=tasks, loopTasks=True, proportional_gain=0.0000002, derivative_gain=0.0000002, integral_gain=0.0000002, velocity=0.3, integral_saturation=500000, duckie_detection_sensitivity=2000, duckie_detection_distance=30000, lane_correction_delay=2)
     node.run()
     # keep spinning
     rospy.spin()
