@@ -16,6 +16,7 @@ class Colors(Enum):
     Magenta = [1.0, 0.0, 1.0]
     Off = [0.0, 0.0, 0.0]
     DarkOrange = [1.0, 0.55, 0]
+    White = [1.0, 1.0, 1.0]  # White color
 
 class State():
     def __init__(self, message_name, colorPattern):
@@ -63,7 +64,7 @@ class LEDControl(DTROS):
         self.sub = rospy.Subscriber(state_topic, String, self.callback)
         self._led_publisher = rospy.Publisher(f'/{self._vehicle_name}/led_emitter_node/led_pattern', LEDPattern, queue_size=10)
         self.states = [
-            State(message_name="No tag detected", colorPattern=ColorPattern(frontLeft=Colors.Off, frontRight=Colors.Off, backLeft=Colors.Off, backRight=Colors.Off)),
+            State(message_name="No tag detected", colorPattern=ColorPattern(frontLeft=Colors.White, frontRight=Colors.White, backLeft=Colors.White, backRight=Colors.White)),
             State(message_name="INTERSECTIONT tag detected", colorPattern=ColorPattern(frontLeft=Colors.Blue, frontRight=Colors.Blue, backLeft=Colors.Blue, backRight=Colors.Blue)),
             State(message_name="STOP tag detected", colorPattern=ColorPattern(frontLeft=Colors.Red, frontRight=Colors.Red, backLeft=Colors.Red, backRight=Colors.Red)),
             State(message_name="UALBERTA tag detected", colorPattern=ColorPattern(frontLeft=Colors.Green, frontRight=Colors.Green, backLeft=Colors.Green, backRight=Colors.Green)),
@@ -79,7 +80,7 @@ class LEDControl(DTROS):
         rospy.loginfo("I heard '%s'", data.data)
 
     def run(self):
-        rate = rospy.Rate(10)
+        rate = rospy.Rate(1)
         while not rospy.is_shutdown():
             for state in self.states:
                 if self._current_state is not None and state.message_name == self._current_state:

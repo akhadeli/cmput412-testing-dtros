@@ -42,6 +42,9 @@ class ImagePublishers(DTROS):
         self._homography_blue_detection_topic = f"/{self._vehicle_name}/camera_node/homography_blue_mask/compressed"
         self._homography_blue_detection_publisher = rospy.Publisher(self._homography_blue_detection_topic, CompressedImage)
 
+        self._homography_red_detection_topic = f"/{self._vehicle_name}/camera_node/homography_red_mask/compressed"
+        self._homography_red_detection_publisher = rospy.Publisher(self._homography_red_detection_topic, CompressedImage)
+
         self._undistort_gray_topic = f"/{self._vehicle_name}/camera_node/undistort_gray/compressed"
         self._undistort_gray_publisher = rospy.Publisher(self._undistort_gray_topic, CompressedImage)
 
@@ -84,11 +87,22 @@ class ImagePublishers(DTROS):
         self.publish_homography_yellow_mask(homography)
         self.publish_homography_blue_mask(homography)
         self.publish_undistort_grayscale(undistorted)
+        self.publish_homography_red_mask(homography)
 
     def publish_undistort_grayscale(self, undistort):
         image = undistort
-        grayscale_image = cv2.cvtColor(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)
+        # Convert to grayscale and store it in grayscale_image
+        grayscale_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+        # Get image dimensions
+        height, width = grayscale_image.shape
+
+        # Crop the right half of grayscale_image
+        grayscale_image = grayscale_image[:, width // 2:]
+
+        # Publish the cropped grayscale image
         self._undistort_gray_publisher.publish(self._bridge.cv2_to_compressed_imgmsg(grayscale_image))
+
 
     def publish_homography_blue_mask(self, homography):
         # Convert warped image to HSV for color detection
@@ -100,6 +114,17 @@ class ImagePublishers(DTROS):
         self._homography_blue_detection_publisher.publish(self._bridge.cv2_to_compressed_imgmsg(mask_blue))
 
         return mask_blue
+    
+    def publish_homography_red_mask(self, homography):
+        hsv = cv2.cvtColor(homography, cv2.COLOR_BGR2HSV)
+
+        lower_red = np.array([0, 100, 100], dtype=np.uint8)  # Lower bound for red
+        upper_red = np.array([10, 255, 255], dtype=np.uint8)  # Upper bound for red
+        mask_red = cv2.inRange(hsv, lower_red, upper_red)
+
+        self._homography_red_detection_publisher.publish(self._bridge.cv2_to_compressed_imgmsg(mask_red))
+
+        return mask_red
     
     def publish_homography_yellow_mask(self, homography):
         # Convert warped image to HSV for color detection
