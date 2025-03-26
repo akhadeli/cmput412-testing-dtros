@@ -5,8 +5,8 @@ source /environment.sh
 # initialize launch file
 dt-launchfile-init
 
-# launch subscriber
-rosrun my_package color_detection.py
+# launch publisher
+rosrun my_package image_publishers.py
 
 # wait for app to end
 dt-launchfile-join

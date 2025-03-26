@@ -9,13 +9,16 @@ from duckietown_msgs.msg import WheelsCmdStamped
 import cv2
 from cv_bridge import CvBridge
 import time
+import math
 
-class RightDrivingVehicleAvoidance(DTROS):
+class PDCrossWalkMain(DTROS):
 
-    def __init__(self, node_name, proportional_gain=0.0000002, derivative_gain=0.0000002, integral_gain=0.0000002, velocity=0.3, integral_saturation=500000, duckie_detection_sensitivity=2000, duckie_detection_distance=50000, lane_correction_delay=2):
+    def __init__(self, node_name, tasks, loopTasks=True, proportional_gain=0.0000002, derivative_gain=0.0000002, integral_gain=0.0000002, velocity=0.3, integral_saturation=500000):
         # initialize the DTROS parent class
-        super(RightDrivingVehicleAvoidance, self).__init__(node_name=node_name, node_type=NodeType.GENERIC)
-        # static parameters
+        super(PDCrossWalkMain, self).__init__(node_name=node_name, node_type=NodeType.GENERIC)
+        self.tasks = tasks
+        self.loopTasks = loopTasks
+
         self._vehicle_name = os.environ['VEHICLE_NAME']
         self._camera_topic = f"/{self._vehicle_name}/camera_node/undistorted_image/compressed"
         wheels_topic = f"/{self._vehicle_name}/wheels_driver_node/wheels_cmd"
@@ -39,41 +42,58 @@ class RightDrivingVehicleAvoidance(DTROS):
         self._blue_detection_topic = f"/{self._vehicle_name}/camera_node/blue_image_mask/compressed"
         self.blue_mask_sub = rospy.Subscriber(self._blue_detection_topic , CompressedImage, self.blue_detection_callback)
 
-        self._duckie_detected = False
-        self._duckie_not_detected_time_stamp = time.time()
+        self._yellow_detection_topic = f"/{self._vehicle_name}/camera_node/yellow_image_mask/compressed"
+        self.yellow_mask_sub = rospy.Subscriber(self._yellow_detection_topic , CompressedImage, self.yellow_detection_callback)
 
-        self.duckie_detection_sensitivity = duckie_detection_sensitivity
-        self.duckie_detection_distance = duckie_detection_distance
+        self._homography_yellow_mask_topic = f"/{self._vehicle_name}/camera_node/homography_yellow_mask/compressed"
+        self._homography_yellow_mask_sub = rospy.Subscriber(self._homography_yellow_mask_topic, CompressedImage, self.homography_yellow_mask_callback)
 
-        self.lane_correction_delay = lane_correction_delay
+        self._homography_blue_mask_topic = f"/{self._vehicle_name}/camera_node/homography_blue_mask/compressed"
+        self._homography_blue_mask_sub = rospy.Subscriber(self._homography_blue_mask_topic, CompressedImage, self.homography_blue_mask_callback)
+
+        self.blue_mask = None
+        self.yellow_mask = None
+        self.homography_yellow_mask = None
+        self.homography_blue_mask = None
+
+        self._tasks = tasks
+        self._loop_tasks = loopTasks
+    
+    def homography_blue_mask_callback(self, msg):
+        self.homography_blue_mask = self._bridge.compressed_imgmsg_to_cv2(msg)
+
+    def homography_yellow_mask_callback(self, msg):
+        self.homography_yellow_mask = self._bridge.compressed_imgmsg_to_cv2(msg)
+        # _, x_coords = np.where(self.homography_yellow_mask > 0)
+
+        # if len(x_coords) == 0:
+        #     return
+
+        # x_variance = np.var(x_coords)
+
+        # magnitude = len(x_coords)
+
+        # print(str(magnitude) + " " + str(x_variance))
+
+    def yellow_detection_callback(self, msg):
+        # msg is already a mask
+        self.yellow_mask = self._bridge.compressed_imgmsg_to_cv2(msg)
     
     def blue_detection_callback(self, msg):
         # msg is already a mask
-        mask_blue = self._bridge.compressed_imgmsg_to_cv2(msg)
+        self.blue_mask = self._bridge.compressed_imgmsg_to_cv2(msg)
 
-        # Find the coordinates of active (non-zero) pixels
-        y_coords, x_coords = np.where(mask_blue > 0)  # y, x positions of active pixels
+        # _, x_coords = np.where(self.blue_mask> 0)
 
-        if len(x_coords) == 0:
-            # print("Detecting nothing")
-            return
+        # if len(x_coords) == 0:
+        #     return
 
-        # Calculate the variance of the x coordinates
-        x_variance = np.var(x_coords)
+        # x_variance = np.var(x_coords)
 
-        # Calculate the magnitude (number of active blue pixels)
-        magnitude = len(x_coords)
+        # magnitude = len(x_coords)
 
-        # print("Magnitude : " + str(magnitude) + ", Variance : " + str(x_variance))
-
-        if (magnitude >= self.duckie_detection_sensitivity):
-            if(x_variance <= self.duckie_detection_distance):
-                self._duckie_detected = True
-                return
-        if self._duckie_detected == True:
-            self._duckie_detected = False
-            self._duckie_not_detected_time_stamp = time.time()
-        
+        # print(str(magnitude) + " " + str(x_variance))
+    
     def callback(self, msg):
         # convert JPEG bytes to CV image
         image = self._bridge.compressed_imgmsg_to_cv2(msg)
@@ -114,37 +134,7 @@ class RightDrivingVehicleAvoidance(DTROS):
         upper_yellow = np.array([35, 255, 255], dtype=np.uint8)
         mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
 
-        if not self._duckie_detected and (time.time() - self._duckie_not_detected_time_stamp) >= self.lane_correction_delay:
-            print("Switching to right lane")
-            yellow_error = self.compute_error(mask=mask_yellow, target_x=100)
-            white_error = self.compute_error(mask=mask_white, target_x=489)
-        else:
-            print("Switching to left lane")
-            yellow_error = self.compute_error(mask=mask_yellow, target_x=489)
-            white_error = self.compute_error(mask=mask_white, target_x=100)
-
-        if yellow_error > 100000 and white_error < -100000:
-            self._error = (yellow_error + abs(white_error)) 
-        elif yellow_error < -100000 and white_error > 100000:
-            self._error = (yellow_error + -1*white_error) 
-        else:
-            self._error = yellow_error + white_error
-
-    
-    def run(self):
-        rate = rospy.Rate(10)
-        while not rospy.is_shutdown():
-            correctionUpdate = self.getUpdate()
-        
-            if correctionUpdate < 0:
-                message = WheelsCmdStamped(vel_left=self.vel, vel_right=self.vel+abs(correctionUpdate))
-            elif correctionUpdate > 0:
-                message = WheelsCmdStamped(vel_left=self.vel+abs(correctionUpdate), vel_right=self.vel)
-            else:
-                message = WheelsCmdStamped(vel_left=self.vel, vel_right=self.vel)
-            
-            self._publisher.publish(message)
-            rate.sleep()
+        self._error = self.compute_error(mask=mask_yellow, target_x=100) + self.compute_error(mask=mask_white, target_x=489)
     
     def getUpdate(self):
         P = self._error*self.proportional_gain
@@ -157,6 +147,24 @@ class RightDrivingVehicleAvoidance(DTROS):
         self._error_last = self._error
 
         return P + I + D
+
+    def run(self):
+        if self._loop_tasks == True:
+            counter = 0
+            while not rospy.is_shutdown():
+                self._distance_right = 0
+                self._distance_left = 0
+                self._tasks[counter%len(self._tasks)].execute(self)
+                counter+=1
+        else:
+            for task in self._tasks:
+                
+                self._distance_right = 0
+                self._distance_left = 0
+
+                task.execute(self)
+            
+        rospy.signal_shutdown(reason="tasks complete")
     
     def compute_error(self, mask, target_x=100, pixel_value=1):
         """
@@ -185,9 +193,168 @@ class RightDrivingVehicleAvoidance(DTROS):
         stop = WheelsCmdStamped(vel_left=0, vel_right=0)
         self._publisher.publish(stop)
 
+class PDCrossWalkTask():
+    def execute(self, dtros):
+        self.runTask(dtros)
+    
+    def runTask(self, dtros):
+        raise Exception("runTask must be overriden for all classes inheriting Task")
+
+class FindCrossWalk(PDCrossWalkTask):
+
+    def __init__(self, detection_magnitude=2000, stopping_distance_in_pixels=5):
+        super().__init__()
+
+        self.detection_magnitude = detection_magnitude
+        self.stopping_distance_in_pixels = stopping_distance_in_pixels
+
+    def runTask(self, dtros):
+        print("Finding crosswalk")
+        rate = rospy.Rate(10)
+        while not rospy.is_shutdown():
+            correctionUpdate = dtros.getUpdate()
+
+            if dtros.homography_blue_mask is not None and self.getCenterDistanceFromBottom(dtros.homography_blue_mask) <= self.stopping_distance_in_pixels:
+                break
+
+            if correctionUpdate < 0:
+                message = WheelsCmdStamped(vel_left=dtros.vel, vel_right=dtros.vel+abs(correctionUpdate))
+            elif correctionUpdate > 0:
+                message = WheelsCmdStamped(vel_left=dtros.vel+abs(correctionUpdate), vel_right=dtros.vel)
+            else:
+                message = WheelsCmdStamped(vel_left=dtros.vel, vel_right=dtros.vel)
+            
+            dtros._publisher.publish(message)
+            
+            rate.sleep()
+        
+        print("Crosswalk Found")
+    
+    def getCenterDistanceFromBottom(self, mask):
+        """
+        Computes the center of active pixel values in the mask and 
+        the distance of the lowest active pixel from the bottom.
+        Also checks if the active pixel count exceeds a given threshold.
+
+        :param mask: Binary mask (numpy array) where active pixels are > 0
+        :param threshold: Minimum number of active pixels required
+        :return: distance_from_bottom if threshold is met, else math.inf
+        """
+        y_coords, x_coords = np.where(mask > 0)
+        active_pixel_count = len(x_coords)
+
+        if active_pixel_count < self.detection_magnitude:
+            return math.inf  # Not enough active pixels
+
+        # Compute distance from the bottom of the image
+        img_height = mask.shape[0]
+        distance_from_bottom = img_height - max(y_coords)
+
+        return distance_from_bottom
+    
+            
+class Stop(PDCrossWalkTask):
+    def __init__(self, stop_time=3):
+        super().__init__()
+        self._stop_time = stop_time
+    
+    def runTask(self, dtros):
+        print("Stopping")
+        stop = WheelsCmdStamped(vel_left=0, vel_right=0)
+        dtros._publisher.publish(stop)
+        time.sleep(self._stop_time)
+
+class WaitForPeduckstrians(PDCrossWalkTask):
+    def __init__(self, detection_magnitude=10000,  detection_variance=5000):
+        super().__init__()
+
+        self.detection_magnitude = detection_magnitude
+        self.detection_variance = detection_variance
+
+    def runTask(self, dtros):
+        rate = rospy.Rate(10)
+        while not rospy.is_shutdown():
+            message = WheelsCmdStamped(vel_left=0, vel_right=0)
+            dtros._publisher.publish(message)
+            if dtros.homography_yellow_mask is not None and not self.isPeduckstriansVisible(dtros.homography_yellow_mask):
+                break
+            rate.sleep()
+        print("No peduckstrians anymore")
+
+    def isPeduckstriansVisible(self, mask):
+        _, x_coords = np.where(mask > 0)
+
+        if len(x_coords) == 0:
+            return
+
+        x_variance = np.var(x_coords)
+
+        magnitude = len(x_coords)
+
+        if (magnitude >= self.detection_magnitude):
+            if(x_variance >= self.detection_variance):
+                print("Peduckstrians detected")
+                return True
+        return False
+    
+class DrivePastCrossWalk(PDCrossWalkTask):
+    def __init__(self, detection_magnitude):
+        super().__init__()
+
+        self.detection_magnitude = detection_magnitude
+
+    def runTask(self, dtros):
+        print("Driving past crosswalk")
+        rate = rospy.Rate(10)
+        while not rospy.is_shutdown():
+            correctionUpdate = dtros.getUpdate()
+
+            if dtros.homography_blue_mask is not None and not self.isDetectingCrossWalk(dtros.homography_blue_mask):
+                break
+
+            if correctionUpdate < 0:
+                message = WheelsCmdStamped(vel_left=dtros.vel, vel_right=dtros.vel+abs(correctionUpdate))
+            elif correctionUpdate > 0:
+                message = WheelsCmdStamped(vel_left=dtros.vel+abs(correctionUpdate), vel_right=dtros.vel)
+            else:
+                message = WheelsCmdStamped(vel_left=dtros.vel, vel_right=dtros.vel)
+            
+            dtros._publisher.publish(message)
+            
+            rate.sleep()
+
+    def isDetectingCrossWalk(self, homography_mask):
+        """
+        Checks if the homography mask exceeds a given threshold.
+
+        :param homography_mask: Binary mask (numpy array) representing the homography
+        :param threshold: Threshold for the active pixel count
+        :return: True if the active pixel count exceeds the threshold, else False
+        """
+        # Count the number of active pixels in the mask
+        active_pixel_count = np.count_nonzero(homography_mask > 0)
+
+        if active_pixel_count > self.detection_magnitude:
+            return True  # Crosswalk detected
+        return False  # No crosswalk detected
+
+    
+
 if __name__ == '__main__':
+
+    tasks = [
+        FindCrossWalk(detection_magnitude=3000,  stopping_distance_in_pixels=5),
+        WaitForPeduckstrians(detection_magnitude=2000,  detection_variance=5000),
+        Stop(stop_time=1),
+        DrivePastCrossWalk(detection_magnitude=3000),
+        FindCrossWalk(detection_magnitude=3000,  stopping_distance_in_pixels=5),
+        WaitForPeduckstrians(detection_magnitude=2000,  detection_variance=5000),
+        Stop(stop_time=1),
+        DrivePastCrossWalk(detection_magnitude=3000),
+        FindCrossWalk(detection_magnitude=3000,  stopping_distance_in_pixels=5),
+    ]
     # create the node
-    node = RightDrivingVehicleAvoidance(node_name="PID_controller_node", proportional_gain=0.0000002, derivative_gain=0.0000002, integral_gain=0.0000002, velocity=0.3, integral_saturation=500000, duckie_detection_sensitivity=2000, duckie_detection_distance=30000, lane_correction_delay=2)
+    node = PDCrossWalkMain(node_name="PDCrossWalkMain_node", tasks=tasks, loopTasks=False, proportional_gain=0.0000002, derivative_gain=0.0000002, integral_gain=0.0000002, velocity=0.3, integral_saturation=500000)
     node.run()
     # keep spinning
     rospy.spin()

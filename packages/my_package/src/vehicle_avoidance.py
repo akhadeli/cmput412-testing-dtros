@@ -133,9 +133,11 @@ class RightDrivingVehicleAvoidance(DTROS):
     
     def run(self):
         rate = rospy.Rate(10)
+
+        stop_time_stamp = None
+
         while not rospy.is_shutdown():
             correctionUpdate = self.getUpdate()
-        
             if correctionUpdate < 0:
                 message = WheelsCmdStamped(vel_left=self.vel, vel_right=self.vel+abs(correctionUpdate))
             elif correctionUpdate > 0:
