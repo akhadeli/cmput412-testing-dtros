@@ -8,6 +8,7 @@ from sensor_msgs.msg import CompressedImage
 from duckietown_msgs.msg import WheelsCmdStamped
 import cv2
 from cv_bridge import CvBridge
+import math
 
 class ImagePublishers(DTROS):
 
@@ -27,6 +28,12 @@ class ImagePublishers(DTROS):
         self._green_detection_topic = f"/{self._vehicle_name}/camera_node/green_image_mask/compressed"
         self._green_publisher = rospy.Publisher(self._green_detection_topic, CompressedImage)
 
+        self._undistorted_white_mask_topic = f"/{self._vehicle_name}/camera_node/undistorted_white_mask/compressed"
+        self._undistorted_white_mask_publisher = rospy.Publisher(self._undistorted_white_mask_topic, CompressedImage)
+
+        self._undistorted_yellow_mask_topic = f"/{self._vehicle_name}/camera_node/undistorted_yellow_mask/compressed"
+        self._undistorted_yellow_mask_publisher = rospy.Publisher(self._undistorted_yellow_mask_topic, CompressedImage)
+
         self._yellow_detection_topic = f"/{self._vehicle_name}/camera_node/yellow_image_mask/compressed"
         self._yellow_publisher = rospy.Publisher(self._yellow_detection_topic, CompressedImage)
 
@@ -38,7 +45,7 @@ class ImagePublishers(DTROS):
 
         self._homography_yellow_detection_topic = f"/{self._vehicle_name}/camera_node/homography_yellow_mask/compressed"
         self._homography_yellow_detection_publisher = rospy.Publisher(self._homography_yellow_detection_topic, CompressedImage)
-
+        
         self._homography_blue_detection_topic = f"/{self._vehicle_name}/camera_node/homography_blue_mask/compressed"
         self._homography_blue_detection_publisher = rospy.Publisher(self._homography_blue_detection_topic, CompressedImage)
 
@@ -71,6 +78,11 @@ class ImagePublishers(DTROS):
         upper_green = np.array([90, 255, 255], dtype=np.uint8)  # Upper bound for green (close to #56B49C)
         mask_green = cv2.inRange(hsv, lower_green, upper_green)
 
+        # Define HSV range for detecting **white color**
+        lower_white = np.array([0, 0, 200], dtype=np.uint8)
+        upper_white = np.array([180, 50, 255], dtype=np.uint8)
+        mask_white = cv2.inRange(hsv, lower_white, upper_white)
+
         # Define HSV range for detecting **yellow color**
         lower_yellow = np.array([15, 100, 100], dtype=np.uint8)
         upper_yellow = np.array([35, 255, 255], dtype=np.uint8)
@@ -85,9 +97,37 @@ class ImagePublishers(DTROS):
         undistorted = self.publish_undistorted_image(image)
         homography = self.publish_homography(undistorted)
         self.publish_homography_yellow_mask(homography)
-        self.publish_homography_blue_mask(homography)
+        # self.publish_homography_blue_mask(homography)
         self.publish_undistort_grayscale(undistorted)
-        self.publish_homography_red_mask(homography)
+        # self.publish_homography_red_mask(homography)
+        # undistorted_mask_yellow = self.publish_yellow_undistort_mask(undistorted)
+        # undistorted_mask_white = self.publish_white_undistort_mask(undistorted)
+
+    def publish_yellow_undistort_mask(self,undistort):
+        # Convert warped image to HSV for color detection
+        hsv = cv2.cvtColor(undistort, cv2.COLOR_BGR2HSV)
+
+        # Define HSV range for detecting **yellow color**
+        lower_yellow = np.array([15, 100, 100], dtype=np.uint8)
+        upper_yellow = np.array([35, 255, 255], dtype=np.uint8)
+        mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
+
+        self._undistorted_yellow_mask_publisher.publish(self._bridge.cv2_to_compressed_imgmsg(mask_yellow))
+
+        return mask_yellow
+
+    def publish_white_undistort_mask(self, undistort):
+        # Convert warped image to HSV for color detection
+        hsv = cv2.cvtColor(undistort, cv2.COLOR_BGR2HSV)
+
+        # Define HSV range for detecting **white color**
+        lower_white = np.array([0, 0, 200], dtype=np.uint8)
+        upper_white = np.array([180, 50, 255], dtype=np.uint8)
+        mask_white = cv2.inRange(hsv, lower_white, upper_white)
+
+        self._undistorted_white_mask_publisher.publish(self._bridge.cv2_to_compressed_imgmsg(mask_white))
+
+        return mask_white
 
     def publish_undistort_grayscale(self, undistort):
         image = undistort
@@ -96,9 +136,6 @@ class ImagePublishers(DTROS):
 
         # Get image dimensions
         height, width = grayscale_image.shape
-
-        # Crop the right half of grayscale_image
-        grayscale_image = grayscale_image[:, width // 2:]
 
         # Publish the cropped grayscale image
         self._undistort_gray_publisher.publish(self._bridge.cv2_to_compressed_imgmsg(grayscale_image))
