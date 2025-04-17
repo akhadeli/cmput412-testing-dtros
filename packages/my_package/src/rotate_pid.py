@@ -49,6 +49,9 @@ class PIDController(DTROS):
         height = undistorted_mask_white.shape[0]
         undistorted_mask_white[:int(height / 4), :] = 0
 
+        # # Edge detection
+        # undistorted_mask_white = cv2.Canny(undistorted_mask_white, 50, 150)
+
         lines_yellow = cv2.HoughLines(undistorted_mask_white, 1, np.pi / 180, threshold=300)
         
         lines = []
@@ -66,6 +69,9 @@ class PIDController(DTROS):
         undistorted_mask_white = image
         height = undistorted_mask_white.shape[0]
         undistorted_mask_white[:int(height / 4), :] = 0
+
+        # # Edge detection
+        # undistorted_mask_white = cv2.Canny(undistorted_mask_white, 50, 150)
 
         lines_yellow = cv2.HoughLines(undistorted_mask_white, 1, np.pi / 180, threshold=100)
         
@@ -85,13 +91,12 @@ class PIDController(DTROS):
         while not rospy.is_shutdown():
             correctionUpdate = self.getUpdate()
             print(correctionUpdate)
-            if abs(correctionUpdate) < 0.1:
-                break
-            elif correctionUpdate < 0:
+            if correctionUpdate < 0:
                 message = WheelsCmdStamped(vel_left=self.vel-abs(correctionUpdate), vel_right=self.vel+abs(correctionUpdate))
             elif correctionUpdate > 0:
                 message = WheelsCmdStamped(vel_left=self.vel+abs(correctionUpdate), vel_right=self.vel-abs(correctionUpdate))
-            
+            else:
+                message = WheelsCmdStamped(vel_left=0, vel_right=0)
             self._publisher.publish(message)
             
             rate.sleep()
@@ -168,7 +173,7 @@ class PIDController(DTROS):
 
 if __name__ == '__main__':
     # create the node
-    node = PIDController(node_name="PID_controller_node", proportional_gain=0.01, derivative_gain=0.01, integral_gain=0, velocity=0, integral_saturation=100)
+    node = PIDController(node_name="PID_controller_node", proportional_gain=0.005, derivative_gain=0.005, integral_gain=0.005, velocity=0, integral_saturation=100)
     node.run()
     # keep spinning
     rospy.spin()

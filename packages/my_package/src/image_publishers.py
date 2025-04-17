@@ -43,6 +43,9 @@ class ImagePublishers(DTROS):
         self._homography_topic = f"/{self._vehicle_name}/camera_node/homography/compressed"
         self._homography_publisher = rospy.Publisher(self._homography_topic, CompressedImage)
 
+        self._homography_two_lanes_wide_topic = f"/{self._vehicle_name}/camera_node/homography_two_lanes_wide/compressed"
+        self._homography_two_lanes_wide_publisher = rospy.Publisher(self._homography_two_lanes_wide_topic, CompressedImage)
+
         self._homography_yellow_detection_topic = f"/{self._vehicle_name}/camera_node/homography_yellow_mask/compressed"
         self._homography_yellow_detection_publisher = rospy.Publisher(self._homography_yellow_detection_topic, CompressedImage)
         
@@ -51,6 +54,9 @@ class ImagePublishers(DTROS):
 
         self._homography_red_detection_topic = f"/{self._vehicle_name}/camera_node/homography_red_mask/compressed"
         self._homography_red_detection_publisher = rospy.Publisher(self._homography_red_detection_topic, CompressedImage)
+        
+        self._homography_white_mask_topic = f"/{self._vehicle_name}/camera_node/homography_white_mask/compressed"
+        self._homography_white_mask_publisher = rospy.Publisher(self._homography_white_mask_topic, CompressedImage)
 
         self._undistort_gray_topic = f"/{self._vehicle_name}/camera_node/undistort_gray/compressed"
         self._undistort_gray_publisher = rospy.Publisher(self._undistort_gray_topic, CompressedImage)
@@ -95,13 +101,27 @@ class ImagePublishers(DTROS):
         self._yellow_publisher.publish(self._bridge.cv2_to_compressed_imgmsg(mask_yellow))
 
         undistorted = self.publish_undistorted_image(image)
+        self.publish_homography_two_lanes_wide(undistorted)
         homography = self.publish_homography(undistorted)
-        self.publish_homography_yellow_mask(homography)
+        self.publish_homography_white_mask(homography)
+        # self.publish_homography_yellow_mask(homography)
         # self.publish_homography_blue_mask(homography)
-        self.publish_undistort_grayscale(undistorted)
+        # # self.publish_undistort_grayscale(undistorted)
         # self.publish_homography_red_mask(homography)
-        # undistorted_mask_yellow = self.publish_yellow_undistort_mask(undistorted)
-        # undistorted_mask_white = self.publish_white_undistort_mask(undistorted)
+        undistorted_mask_yellow = self.publish_yellow_undistort_mask(undistorted)
+        undistorted_mask_white = self.publish_white_undistort_mask(undistorted)
+    
+    def publish_homography_white_mask(self, homography):
+        hsv = cv2.cvtColor(homography, cv2.COLOR_BGR2HSV)
+
+        # Define HSV range for detecting **white color**
+        lower_white = np.array([0, 0, 200], dtype=np.uint8)
+        upper_white = np.array([180, 50, 255], dtype=np.uint8)
+        mask_white = cv2.inRange(hsv, lower_white, upper_white)
+
+        self._homography_white_mask_publisher.publish(self._bridge.cv2_to_compressed_imgmsg(mask_white))
+
+        return mask_white
 
     def publish_yellow_undistort_mask(self,undistort):
         # Convert warped image to HSV for color detection
@@ -182,16 +202,16 @@ class ImagePublishers(DTROS):
         
         src = np.float32([
             [0,382],
-            [224, 191],  # Bottom left (near where left lane line is)
-            [589, 382],  # Bottom right (near where right lane line is)
-            [364, 191],  # Top left (near vanishing point for left lane)
+            [224, 191],
+            [589, 382],
+            [364, 191],
         ])
 
         dst = np.float32([
             [100, 382],
-            [100, 0],  # Bottom left (destination for left lane)
-            [489, 382],  # Bottom right (destination for right lane)
-            [489, 0],    # Top left (destination after warping)
+            [100, 0],
+            [489, 382],
+            [489, 0],
         ])
 
         # cv2.circle(image, tuple(point), 5, (0, 0, 255), -1)  # Red dots
@@ -201,6 +221,33 @@ class ImagePublishers(DTROS):
         warped = cv2.warpPerspective(image, M, img_size)
 
         self._homography_publisher.publish(self._bridge.cv2_to_compressed_imgmsg(warped))
+
+        return warped
+
+    def publish_homography_two_lanes_wide(self, image):
+        h, w, _ = image.shape
+
+        img_size = (w, h)
+        
+        src = np.float32([
+            [469,191], # Upper Right
+            [589, 236], # Lower Right
+            [120, 191], # Upper Left
+            [0, 236], # Lower left
+        ])
+
+        dst = np.float32([
+            [441, 0],
+            [441, 382],
+            [148, 0],
+            [148, 382]
+        ])
+
+        M = cv2.getPerspectiveTransform(src, dst)
+        
+        warped = cv2.warpPerspective(image, M, img_size)
+
+        self._homography_two_lanes_wide_publisher.publish(self._bridge.cv2_to_compressed_imgmsg(warped))
 
         return warped
     
@@ -227,7 +274,7 @@ class ImagePublishers(DTROS):
 
         h, w, _ = undistorted.shape
 
-        # point = [224, 191]
+        # point = [120, 191]
         # print(point)
         # cv2.circle(undistorted, tuple(point), 5, (0, 0, 255), -1)  # Red dots
 

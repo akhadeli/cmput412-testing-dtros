@@ -81,20 +81,22 @@ class PIDController(DTROS):
 
     
     def run(self):
-        rate = rospy.Rate(10)
+        rate = rospy.Rate(20)
         while not rospy.is_shutdown():
             correctionUpdate = self.getUpdate()
-            
-            if correctionUpdate < 0:
-                message = WheelsCmdStamped(vel_left=self.vel, vel_right=self.vel+abs(correctionUpdate))
+            print(correctionUpdate)
+            if abs(correctionUpdate) < 0.1:
+                break
+            elif correctionUpdate < 0:
+                message = WheelsCmdStamped(vel_left=self.vel-abs(correctionUpdate), vel_right=self.vel+abs(correctionUpdate))
             elif correctionUpdate > 0:
-                message = WheelsCmdStamped(vel_left=self.vel+abs(correctionUpdate), vel_right=self.vel)
-            else:
-                message = WheelsCmdStamped(vel_left=self.vel, vel_right=self.vel)
+                message = WheelsCmdStamped(vel_left=self.vel+abs(correctionUpdate), vel_right=self.vel-abs(correctionUpdate))
             
             self._publisher.publish(message)
             
             rate.sleep()
+            
+        rospy.signal_shutdown(reason="tasks complete")
 
     def updateError(self):
         lines = []
@@ -166,7 +168,7 @@ class PIDController(DTROS):
 
 if __name__ == '__main__':
     # create the node
-    node = PIDController(node_name="PID_controller_node", proportional_gain=0.01, derivative_gain=0.01, integral_gain=0, velocity=0.3, integral_saturation=100)
+    node = PIDController(node_name="PID_controller_node", proportional_gain=0.01, derivative_gain=0.01, integral_gain=0, velocity=0, integral_saturation=100)
     node.run()
     # keep spinning
     rospy.spin()

@@ -6,7 +6,7 @@ source /environment.sh
 dt-launchfile-init
 
 # launch publisher
-rosrun my_package forwardpark_pid.py
+rosrun my_package blindstraight_pid.py
 
 # wait for app to end
 dt-launchfile-join
