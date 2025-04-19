@@ -101,10 +101,10 @@ class RotateTask():
 if __name__ == "__main__":
     try:
         precision = 40 # published messages per second
-        tolerance = 0.05 # accept total change in angle within tolerance
+        tolerance = 0.1 # accept total change in angle within tolerance
         throttle = 0.5
         # tasks = [RotateTask((-math.pi/2)), RotateTask((math.pi/2))]
-        tasks = [RotateTask((-math.pi))]
+        tasks = [RotateTask((math.pi/2))]
         node = Rotate(node_name="rotate_node", tasks=tasks, throttle=throttle, tolerance=tolerance, precision=precision)
         node.run()
         rospy.spin()

@@ -16,6 +16,9 @@ import numpy as np
 from custom_utils.mask_operations import MaskOperations
 from custom_utils.constants import Stall
 from custom_utils.dtros_operations import DtrosOperations
+from custom_utils.pid_operations import PIDOperations
+import dt_apriltags
+import numpy as np
 
 class FinalBehaviorMainTask():
     def execute(self, dtros):
@@ -142,6 +145,8 @@ class TurnRightTask(FinalBehaviorMainTask):
             msg = f""" total_change_angle: {total_change_angle}, target_radian {target_radian}"""
             rospy.loginfo(msg)
             if abs(total_change_angle) >= (abs(target_radian) - tolerance):
+                message = WheelsCmdStamped(vel_left=0, vel_right=0)
+                dtros._wheels_publisher.publish(message)
                 break
 
             dtros._wheels_publisher.publish(message)
@@ -221,6 +226,8 @@ class TurnLeftTask(FinalBehaviorMainTask):
             msg = f""" total_change_angle: {total_change_angle}, target_radian {target_radian}"""
             rospy.loginfo(msg)
             if abs(total_change_angle) >= (abs(target_radian) - tolerance):
+                message = WheelsCmdStamped(vel_left=0, vel_right=0)
+                dtros._wheels_publisher.publish(message)
                 break
 
             dtros._wheels_publisher.publish(message)
@@ -229,10 +236,10 @@ class TurnLeftTask(FinalBehaviorMainTask):
         msg = f""" total_change_angle: {total_change_angle}, target_radian {target_radian}"""
         rospy.loginfo(msg)
 
-class PerpedicularAlignmentTask(FinalBehaviorMainTask):
-    def __init__(self, stall, proportional_gain, derivative_gain, integral_gain, velocity, integral_saturation):
+class StallAlignmentTask(FinalBehaviorMainTask):
+    def __init__(self, target_stall, proportional_gain, derivative_gain, integral_gain, velocity, integral_saturation):
         
-        if not isinstance(stall, Stall):
+        if not isinstance(target_stall, Stall):
             raise Exception("stall must be of type Stall(Enum)")
 
         super().__init__()
@@ -254,7 +261,7 @@ class PerpedicularAlignmentTask(FinalBehaviorMainTask):
 
         self._homography_white_mask = None
 
-        self._stall = stall
+        self._target_stall = target_stall
 
         self._curr_drive_direction = "Forward"
 
@@ -294,7 +301,7 @@ class PerpedicularAlignmentTask(FinalBehaviorMainTask):
 
         undistorted_mask_white = cv2.Canny(undistorted_mask_white, 50, 150)
 
-        lines_yellow = cv2.HoughLines(undistorted_mask_white, 1, np.pi / 180, threshold=100)
+        lines_yellow = cv2.HoughLines(undistorted_mask_white, 1, np.pi / 180, threshold=150)
         
         lines = []
 
@@ -324,10 +331,14 @@ class PerpedicularAlignmentTask(FinalBehaviorMainTask):
         while not rospy.is_shutdown():
             correctionUpdate = self.getUpdate()
 
-            if self._curr_drive_direction == "Forward" and MaskOperations.getActiveCount(self._homography_white_mask) > 10000 and MaskOperations.getActiveCenter(self._homography_white_mask)[1] > 300:
+            if self._curr_drive_direction == "Forward" and MaskOperations.getActiveCount(self._homography_white_mask) > 10000 and MaskOperations.getActiveCenter(self._homography_white_mask)[1] > 200:
+                if self._target_stall in [Stall.TWO, Stall.FOUR]:
+                    message = WheelsCmdStamped(vel_left=0, vel_right=0)
+                    dtros._wheels_publisher.publish(message)
+                    break
                 self._curr_drive_direction = "Backward"
 
-            if self._curr_drive_direction == "Backward" and MaskOperations.getActiveCount(self._homography_white_mask) > 10000 and MaskOperations.getActiveCenter(self._homography_white_mask)[1] < 100:
+            if self._curr_drive_direction == "Backward" and MaskOperations.getActiveCenter(self._homography_white_mask)[1] < 150:
                 break
 
             if self._curr_drive_direction == "Forward":
@@ -349,6 +360,11 @@ class PerpedicularAlignmentTask(FinalBehaviorMainTask):
             
             rate.sleep()
 
+        if self._target_stall in [Stall.ONE, Stall.TWO]:
+            TurnRightTask(R=0, angular_velocity=3, tolerance=0.6).execute(dtros)
+        else:
+            TurnLeftTask(R=0, angular_velocity=3, tolerance=0.6).execute(dtros)
+        
     def updateError(self):
         lines = []
         lines.extend(self._yellow_lines) 
@@ -358,10 +374,8 @@ class PerpedicularAlignmentTask(FinalBehaviorMainTask):
             horiz_scores = []
             for rho, theta in lines:
                 angle_deg = np.degrees(theta)
-                horiz_score = min(abs(angle_deg), abs(angle_deg - 180))
                 angles.append(angle_deg)
-                horiz_scores.append(horiz_score)
-            
+
             if len(angles) == 0 or horiz_scores == 0:
                 return
 
@@ -391,11 +405,102 @@ class PerpedicularAlignmentTask(FinalBehaviorMainTask):
         self._error_last = self._error
 
         return P + I + D
+    
+class ForwardParkingTask(FinalBehaviorMainTask):
+    def __init__(self, target_stall):
+        self._target_stall = target_stall
+        self.detector = dt_apriltags.Detector(families="tag36h11")
+        self._bridge = CvBridge()
+        self._target_tag_error = 0
+        self._white_line_error = 0
+
+        self._error_last = 0
+
+        self._tag_perimeter = 0
+
+    def onStart(self, dtros):
+        vehicle_name = os.environ["VEHICLE_NAME"]
+        undistort_gray_topic = f"/{vehicle_name}/camera_node/undistort_gray/compressed"
+        dtros._sub_undistorted_gray = rospy.Subscriber(undistort_gray_topic, CompressedImage, self.callback_undistort_gray)
+
+    def callback_undistort_gray(self, msg):
+        # Convert JPEG bytes to CV image
+        image = self._bridge.compressed_imgmsg_to_cv2(msg)
+
+        height, width = image.shape[:2]
+
+        # If the image is grayscale (single channel), convert it to BGR
+        if len(image.shape) == 2:
+            image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+
+        # Detect AprilTags (assuming detector works on grayscale, you might need to convert back or detect on the original)
+        results = self.detector.detect(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY))
+        for r in results:
+            if r.tag_id == self._target_stall.value:
+            # Extract the bounding box coordinates and convert to integers
+                (ptA, ptB, ptC, ptD) = r.corners
+                ptA = (int(ptA[0]), int(ptA[1]))
+                ptB = (int(ptB[0]), int(ptB[1]))
+                ptC = (int(ptC[0]), int(ptC[1]))
+                ptD = (int(ptD[0]), int(ptD[1]))
+
+                self._tag_perimeter = (
+                    np.linalg.norm(np.array(ptA) - np.array(ptB)) +
+                    np.linalg.norm(np.array(ptB) - np.array(ptC)) +
+                    np.linalg.norm(np.array(ptC) - np.array(ptD)) +
+                    np.linalg.norm(np.array(ptD) - np.array(ptA))
+                )
+
+                # Draw the bounding box of the AprilTag detection in green
+                cv2.line(image, ptA, ptB, (0, 255, 0), 2)
+                cv2.line(image, ptB, ptC, (0, 255, 0), 2)
+                cv2.line(image, ptC, ptD, (0, 255, 0), 2)
+                cv2.line(image, ptD, ptA, (0, 255, 0), 2)
+
+                # Draw the center of the AprilTag
+                (cX, cY) = (int(r.center[0]), int(r.center[1]))
+                cv2.circle(image, (cX, cY), 5, (0, 0, 255), -1)
+
+                # Draw the tag id in green on the image
+                cv2.putText(image, str(r.tag_id), (ptA[0], ptA[1] - 15),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                
+                self._target_tag_error = (r.center[0] - (width // 2))*0.005
+                print(self._target_tag_error)
+                cv2.imshow("Detection", image)
+                cv2.waitKey(1)
+                return
+            
+        self._target_tag_error = 0
+        
+        cv2.imshow("Detection", image)
+        cv2.waitKey(1)
+
+
+    def runTask(self, dtros):
+        rate = rospy.Rate(10)
+        while not rospy.is_shutdown():
+            if self._tag_perimeter >= 400:
+                message = WheelsCmdStamped(vel_left=0, vel_right=0)
+                dtros._wheels_publisher.publish(message)
+                break
+            
+            _, error_last_updated, message = PIDOperations.getForwardPIDWheelMsg(base_velocity=0.3, error_last=self._error_last, integration_stored=0, error=self._target_tag_error, proportional_gain=1, derivative_gain=1, integral_gain=0, integral_saturation=0)
+            
+            self._error_last = error_last_updated
+
+            dtros._wheels_publisher.publish(message)
+            
+            rate.sleep()
+
+
+
         
 if __name__ == "__main__":
+    stall = Stall.ONE
     tasks = [
-        # TurnLeftTask(R=0.7)
-        PerpedicularAlignmentTask(stall=Stall.ONE, proportional_gain=0.05, derivative_gain=0.05, integral_gain=0, velocity=0.3, integral_saturation=100)
+        StallAlignmentTask(target_stall=stall, proportional_gain=0.1, derivative_gain=0.1, integral_gain=0, velocity=0.3, integral_saturation=100),
+        ForwardParkingTask(target_stall=stall)
     ]
     node = FinalBehaviorMain(node_name="final_behavior_main_node", tasks=tasks)
     node.run()

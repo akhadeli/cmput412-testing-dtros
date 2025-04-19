@@ -118,7 +118,7 @@ class ImagePublishers(DTROS):
         self.publish_homography_white_mask(homography)
         # self.publish_homography_yellow_mask(homography)
         # self.publish_homography_blue_mask(homography)
-        # self.publish_undistort_grayscale(undistorted)
+        self.publish_undistort_grayscale(undistorted)
         # self.publish_homography_red_mask(homography)
         undistorted_mask_yellow = self.publish_yellow_undistort_mask(undistorted)
         undistorted_mask_white = self.publish_white_undistort_mask(undistorted)
