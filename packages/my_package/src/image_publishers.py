@@ -46,6 +46,12 @@ class ImagePublishers(DTROS):
         self._homography_two_lanes_wide_topic = f"/{self._vehicle_name}/camera_node/homography_two_lanes_wide/compressed"
         self._homography_two_lanes_wide_publisher = rospy.Publisher(self._homography_two_lanes_wide_topic, CompressedImage)
 
+        self._homography_two_lanes_wide_gray_topic = f"/{self._vehicle_name}/camera_node/homography_two_lanes_wide_gray/compressed"
+        self._homography_two_lanes_wide_gray_publisher = rospy.Publisher(self._homography_two_lanes_wide_gray_topic, CompressedImage)
+
+        self._homography_two_lanes_wide_edges_topic = f"/{self._vehicle_name}/camera_node/homography_two_lanes_wide_edges/compressed"
+        self._homography_two_lanes_wide_edges_publisher = rospy.Publisher(self._homography_two_lanes_wide_edges_topic, CompressedImage)
+
         self._homography_yellow_detection_topic = f"/{self._vehicle_name}/camera_node/homography_yellow_mask/compressed"
         self._homography_yellow_detection_publisher = rospy.Publisher(self._homography_yellow_detection_topic, CompressedImage)
         
@@ -58,6 +64,9 @@ class ImagePublishers(DTROS):
         self._homography_white_mask_topic = f"/{self._vehicle_name}/camera_node/homography_white_mask/compressed"
         self._homography_white_mask_publisher = rospy.Publisher(self._homography_white_mask_topic, CompressedImage)
 
+        self._homography_wide_white_mask_topic = f"/{self._vehicle_name}/camera_node/homography_wide_white_mask/compressed"
+        self._homography_wide_white_mask_publisher = rospy.Publisher(self._homography_wide_white_mask_topic, CompressedImage)
+
         self._undistort_gray_topic = f"/{self._vehicle_name}/camera_node/undistort_gray/compressed"
         self._undistort_gray_publisher = rospy.Publisher(self._undistort_gray_topic, CompressedImage)
 
@@ -69,48 +78,79 @@ class ImagePublishers(DTROS):
         # Convert JPEG bytes to CV image
         image = self._bridge.compressed_imgmsg_to_cv2(msg)
 
-        # Convert warped image to HSV for color detection
-        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        # # Convert warped image to HSV for color detection
+        # hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
-        lower_red = np.array([0, 100, 100], dtype=np.uint8)  # Lower bound for red
-        upper_red = np.array([10, 255, 255], dtype=np.uint8)  # Upper bound for red
-        mask_red = cv2.inRange(hsv, lower_red, upper_red)
+        # lower_red = np.array([0, 100, 100], dtype=np.uint8)  # Lower bound for red
+        # upper_red = np.array([10, 255, 255], dtype=np.uint8)  # Upper bound for red
+        # mask_red = cv2.inRange(hsv, lower_red, upper_red)
 
-        lower_blue = np.array([100, 150, 0], dtype=np.uint8)  # Lower bound for blue
-        upper_blue = np.array([140, 255, 255], dtype=np.uint8)  # Upper bound for blue
-        mask_blue = cv2.inRange(hsv, lower_blue, upper_blue)
+        # lower_blue = np.array([100, 150, 0], dtype=np.uint8)  # Lower bound for blue
+        # upper_blue = np.array([140, 255, 255], dtype=np.uint8)  # Upper bound for blue
+        # mask_blue = cv2.inRange(hsv, lower_blue, upper_blue)
 
-        lower_green = np.array([40, 40, 150], dtype=np.uint8)  # Lower bound for green (close to #56B49C)
-        upper_green = np.array([90, 255, 255], dtype=np.uint8)  # Upper bound for green (close to #56B49C)
-        mask_green = cv2.inRange(hsv, lower_green, upper_green)
+        # lower_green = np.array([40, 40, 150], dtype=np.uint8)  # Lower bound for green (close to #56B49C)
+        # upper_green = np.array([90, 255, 255], dtype=np.uint8)  # Upper bound for green (close to #56B49C)
+        # mask_green = cv2.inRange(hsv, lower_green, upper_green)
+
+        # # Define HSV range for detecting **white color**
+        # lower_white = np.array([0, 0, 200], dtype=np.uint8)
+        # upper_white = np.array([180, 50, 255], dtype=np.uint8)
+        # mask_white = cv2.inRange(hsv, lower_white, upper_white)
+
+        # # Define HSV range for detecting **yellow color**
+        # lower_yellow = np.array([15, 100, 100], dtype=np.uint8)
+        # upper_yellow = np.array([35, 255, 255], dtype=np.uint8)
+        # mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
+
+        # # Publish the masks
+        # self._blue_publisher.publish(self._bridge.cv2_to_compressed_imgmsg(mask_blue))
+        # self._red_publisher.publish(self._bridge.cv2_to_compressed_imgmsg(mask_red))
+        # self._green_publisher.publish(self._bridge.cv2_to_compressed_imgmsg(mask_green))
+        # self._yellow_publisher.publish(self._bridge.cv2_to_compressed_imgmsg(mask_yellow))
+
+        undistorted = self.publish_undistorted_image(image)
+        # homography_two_lanes_wide = self.publish_homography_two_lanes_wide(undistorted)
+        # self.publish_homography_wide_white_mask(homography_two_lanes_wide)
+        # homography_two_lanes_wide_gray = self.publish_homography_two_lanes_wide_gray(homography_two_lanes_wide)
+        # self.publish_homography_two_lanes_wide_edges(homography_two_lanes_wide_gray)
+        homography = self.publish_homography(undistorted)
+        self.publish_homography_white_mask(homography)
+        # self.publish_homography_yellow_mask(homography)
+        # self.publish_homography_blue_mask(homography)
+        # self.publish_undistort_grayscale(undistorted)
+        # self.publish_homography_red_mask(homography)
+        undistorted_mask_yellow = self.publish_yellow_undistort_mask(undistorted)
+        undistorted_mask_white = self.publish_white_undistort_mask(undistorted)
+
+    def publish_homography_wide_white_mask(self, homography_wide):
+        hsv = cv2.cvtColor(homography_wide, cv2.COLOR_BGR2HSV)
 
         # Define HSV range for detecting **white color**
         lower_white = np.array([0, 0, 200], dtype=np.uint8)
         upper_white = np.array([180, 50, 255], dtype=np.uint8)
         mask_white = cv2.inRange(hsv, lower_white, upper_white)
 
-        # Define HSV range for detecting **yellow color**
-        lower_yellow = np.array([15, 100, 100], dtype=np.uint8)
-        upper_yellow = np.array([35, 255, 255], dtype=np.uint8)
-        mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
+        self._homography_wide_white_mask_publisher.publish(self._bridge.cv2_to_compressed_imgmsg(mask_white))
 
-        # Publish the masks
-        self._blue_publisher.publish(self._bridge.cv2_to_compressed_imgmsg(mask_blue))
-        self._red_publisher.publish(self._bridge.cv2_to_compressed_imgmsg(mask_red))
-        self._green_publisher.publish(self._bridge.cv2_to_compressed_imgmsg(mask_green))
-        self._yellow_publisher.publish(self._bridge.cv2_to_compressed_imgmsg(mask_yellow))
+        return mask_white
 
-        undistorted = self.publish_undistorted_image(image)
-        self.publish_homography_two_lanes_wide(undistorted)
-        homography = self.publish_homography(undistorted)
-        self.publish_homography_white_mask(homography)
-        # self.publish_homography_yellow_mask(homography)
-        # self.publish_homography_blue_mask(homography)
-        # # self.publish_undistort_grayscale(undistorted)
-        # self.publish_homography_red_mask(homography)
-        undistorted_mask_yellow = self.publish_yellow_undistort_mask(undistorted)
-        undistorted_mask_white = self.publish_white_undistort_mask(undistorted)
-    
+    def publish_homography_two_lanes_wide_edges(self, grayscale):
+        edges = cv2.Canny(grayscale, 50, 150)
+
+        self._homography_two_lanes_wide_edges_publisher.publish(self._bridge.cv2_to_compressed_imgmsg(edges))
+
+        return edges
+
+    def publish_homography_two_lanes_wide_gray(self, homography_two_lanes_wide):
+        # Convert to grayscale and store it in grayscale_image
+        grayscale_image = cv2.cvtColor(homography_two_lanes_wide, cv2.COLOR_BGR2GRAY)
+
+        # Publish the cropped grayscale image
+        self._homography_two_lanes_wide_gray_publisher.publish(self._bridge.cv2_to_compressed_imgmsg(grayscale_image))
+
+        return grayscale_image
+
     def publish_homography_white_mask(self, homography):
         hsv = cv2.cvtColor(homography, cv2.COLOR_BGR2HSV)
 
