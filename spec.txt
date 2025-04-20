@@ -1,0 +1,149 @@
+Description
+For the final project, you will need to traverse the Duckietown from start to finish and collect points
+along the way. There are four stages of the town, each with different tasks to complete.
+During the final project demo, your group will have 3 rounds to attempt the course and collect as many
+points as you can (as laid out in the table at the end of this document). The round with the most
+collected points will be counted as your final demo mark. A round is composed of 4 stages; for each
+stage there are potential points to collect, and the amount varies by stage. To get 100% you need to
+collect 100 points out of 125 potential points. Partial points will not be assigned for each subtask (i.e.,
+you will either get 5 points for each row in the table or 0 points).
+Your round starts when you launch your program and finishes when either:
+a) You reach the end of the course (park in the parking lot);
+b) 10 minutes elapse;
+c) Your program crashes or you manually stop your program.
+This means that you are allowed to pick your robot up manually if it drives off of the town or gets stuck
+and place it back on the course. You must place your robot back on the course at the position it drove
+off of the town or right after the place where it got stuck (i.e., you cannot try the same subtask over
+again within the same round). You cannot move any other parts of the town (i.e., apriltags,
+peduckstrians or other duckiebots), you are only allowed to touch your own robot.
+If you want to skip a task you are allowed to pick your robot up and manually move it forward in the
+course. You cannot move it backwards in the course.
+You cannot control the robot with manual keyboard control; it must navigate the town autonomously.
+As soon as you touch your laptop to send the robot commands the round is over.
+
+Deliverables
+There is no report for this lab
+Resources
+You can use any material on the internet as long as you cite it properly. You are encouraged to
+collaborate with your labmates and if you develop a solution together please acknowledge who you
+worked with in your written report.
+
+Stage 1: Duckiebot Tailing
+In Stage 1 you are being tested on your ability to Tail (follow) another Duckiebot autonomously at a safe
+driving distance. You will need to determine what a safe driving distance is. DO NOT run into the
+Duckiebot you are following.
+Your LEDs should change to indicate you are in following mode, or not.
+When the Duckiebot you are following turns at an intersection, your bot should stop at the intersection,
+and then turn the same direction to continue following the other Duckiebot. You may lose sight of the
+leader at some point, you should lane follow until you find them again.
+You must stop at intersections (the red lines) and keep your wheels inside the lines (like exercise 3).
+You will have the opportunity to collect a maximum of 25 points during Stage 1 (outlined in the table at
+the end of this document).
+
+<see image 1>
+
+Stage 2: Apriltag Detection and Lane Following
+In Stage 2 you are being tested on your ability to accurately detect apriltags and reliably drive within the
+proper lane.
+At the first intersection you encounter you will find an apriltag that Indicates the direction which you
+should turn.
+You must completely stop at every red line that you encounter (there will also be an apriltag at each red
+line telling you which direction to turn).
+You must keep your wheels inside the lines (like exercise 3).
+You will have the opportunity to collect a maximum of 30 points during Stage 2 (outlined in the table at
+the end of this document).
+
+<see image 2>
+
+Stage 3: Obstacle Avoidance
+Why did the duck cross the road?
+In Stage 3 you are being tested on your ability to safely navigate the road.
+You will be required to detect and wait for peduckstrians to cross at the crosswalk as well as detect and
+maneuver around a duckiebot broken down on the side of the road.
+The two duck crosswalks will be marked with an apriltag. You must always stop at the crosswalk and
+check if there are any ducks crossing the road. If there is a duck, you must wait for them to finish
+crossing the road before continuing to drive. If there is not a duck crossing, then you may continue
+driving right away. Only one of the crosswalks will have a duck crossing the road; the duck will be
+clearly visible in the middle of the lane that you are driving in. You must stay in your own lane when
+driving through the crosswalk.
+When you detect the broken down duckiebot on the side of the road you must stop to inquire if they
+would like assistance (don’t worry - they won’t). After you have stopped you will need to safely drive
+around the duckiebot and continue along the road in the proper lane.
+You will have the opportunity to collect a maximum of 30 points during Stage 3.
+To prove he wasn’t a chicken!
+
+<see image 3>
+
+Stage 4: The Parking Lot
+For Stage 4 you are being tested on your ability to find and park in the correct stall.
+At the beginning of each round you will be told by the TA which stall you must park at in the parking lot
+(stall 1, stall 2, stall 3, or stall 4). You should pass this as a command line argument to your program at
+launch time.
+Each stall will be marked with a unique, static apriltag.
+At the end of the round your duckiebot must drive to the correct stall, park, and turn itself off (i.e.,
+properly shut down the robot and the launched program).
+You will have the opportunity to collect a maximum of 40 points during Stage 4
+
+<see image 4>
+
+Stage One
+LEDs indicate follow mode +5 points
+Stops at the line and turns correctly after the Duckiebot +5 points
+Re-aquires Duckiebot when it catches up +5 points
+Stays in the correct lane +5 points
+Complete phase two with autonomous navigation without running into an apriltag or the Duckiebot +5 points
+Stage Two
+Detect left turn apriltag at intersection, stop, then turn left +5 points
+Detect right turn apriltag at intersection, stop, then turn right +5 points
+Stay within the correct lane while turning left through the intersection +5 points
+Stay within the correct lane while turning right through the intersection +5 points
+Stay within the correct lane while going around the curved part of the road +5 points
+Complete stage one with autonomous navigation without running into an apriltag +5 points
+Stage Three
+Stop at the first duck crosswalk apriltag +5 points
+Stop at the second duck crosswalk apriltag +5 points
+Drive through the first duck crosswalk if/when there are no ducks on the road +5 points
+Drive through the second duck crosswalk if/when there are no ducks on the road +5 points
+Stop at the broken duckiebot to see if they require assistance +5 points
+Safely drive around the broken duckiebot without hitting it +5 points
+Stage Four
+Stop before entering the parking lot +5 points
+Drive to the correct side of the parking lot +5 points
+Park in the correct parking spot (most of robot in stall) +5 points
+Back into the correct parking spot +5 points
+Park properly within the stall (not touching the lines denoting the stall) +5 points
+Turn off Duckiebot and program after parked +5 points
+Complete stage three with autonomous navigation without running into an apriltag +5 points
+Made it through entire course without touching your duckiebot +5 points
+
+Team:
+Stage One Round 1 Round 2 Round 3
+LEDs indicate follow mode
+Stops at the line and turns correctly after the Duckiebot
+Re-aquires Duckiebot when it catches up
+Stays in the correct lane
+Complete stage two with autonomous navigation without running into an apriltag or the Duckiebot
+Stage Two
+Detect left turn apriltag at intersection and turn left
+Detect right turn apriltag at intersection and turn right
+Stay within the correct lane while turning left through the intersection
+Stay within the correct lane while turning right through the intersection
+Stay within the correct lane while going around the curved part of the road
+Complete stage one with autonomous navigation without running into an apriltag
+Stage Three
+Stop at the first duck crosswalk apriltag
+Stop at the second duck crosswalk apriltag
+Drive through the first duck crosswalk if there are no ducks on the road
+Drive through the second duck crosswalk if there are no ducks on the road
+Stop at the broken duckiebot to see if they require assistance
+Safely drive around the broken duckiebot without hitting it
+Stage Four
+Stop before entering the parking lot
+Drive to the correct side of the parking lot
+Park in the correct parking spot (most of robot in stall)
+Back into the correct parking spot
+Park properly within the stall (not touching the lines denoting the stall)
+Turn off Duckiebot and program after parked
+Complete stage three with autonomous navigation without running into an apriltag
+Made it through entire course without touching your duckiebot
+TOTAL POINTS COLLECTED
