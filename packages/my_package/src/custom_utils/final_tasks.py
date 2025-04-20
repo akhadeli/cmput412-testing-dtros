@@ -439,17 +439,69 @@ class LaneFollowing(FinalBehaviorMainTask):
         dtros._sub_raw_image = rospy.Subscriber(self._raw_image_topic, CompressedImage, self.callback_raw_image)
 
     def callback_raw_image(self, msg):
-        image = self._bridge.compressed_imgmsg_to_cv2(msg)
-        self._undistorted = ImageOperations.undistort(image)
-        self._homography = ImageOperations.getHomography(self._undistorted)
-        self._mask_white = ImageOperations.getWhiteMask(self._homography)
-        self._mask_yellow = ImageOperations.getYellowMask(self._homography)
-        
-        yellow_error = MaskOperations.computeErrorInAxisX(mask=self._mask_yellow, target_x=100, pixel_value=1)
-        white_error = MaskOperations.computeErrorInAxisX(mask=self._mask_white, target_x=489, pixel_value=1)
+        try:
+            # Convert compressed image
+            cv_image = self._bridge.compressed_imgmsg_to_cv2(msg)
+            
+            # Set image dimensions if not set
+            if self._image_height is None or self._image_width is None:
+                self._image_height, self._image_width = cv_image.shape[:2]
+            
+            # Convert to HSV for better color detection
+            hsv = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
+            
+            # Detect red lines (intersection)
+            red_lower = np.array([0, 50, 50])
+            red_upper = np.array([10, 255, 255])
+            red_mask = cv2.inRange(hsv, red_lower, red_upper)
+            
+            # Detect blue (leader Duckiebot)
+            blue_lower = np.array([100, 50, 50])
+            blue_upper = np.array([130, 255, 255])
+            blue_mask = cv2.inRange(hsv, blue_lower, blue_upper)
+            
+            # Check if at intersection
+            red_pixels = np.sum(red_mask > 0)
+            self._at_intersection = red_pixels > self._detection_threshold
+            
+            # Find leader position
+            blue_pixels = np.sum(blue_mask > 0)
+            if blue_pixels > self._detection_threshold:
+                # Get centroid of blue area
+                M = cv2.moments(blue_mask)
+                if M["m00"] > 0:
+                    cx = int(M["m10"] / M["m00"])
+                    cy = int(M["m01"] / M["m00"])
+                    self._last_known_position = (cx, cy)
+                    self._leader_lost = False
+                    self._following_active = True
+            else:
+                self._leader_lost = True
+            
+            # Update LED state
+            if self._following_active:
+                if self._leader_lost:
+                    self.set_led_pattern(dtros, 'searching')
+                else:
+                    self.set_led_pattern(dtros, 'following')
+            else:
+                self.set_led_pattern(dtros, 'inactive')
+            
+            # Store direction at intersection
+            if self._at_intersection and not self._leader_lost:
+                # Determine turn direction based on leader position
+                image_center = cv_image.shape[1] // 2
+                if self._last_known_position:
+                    if self._last_known_position[0] < image_center - 100:
+                        self._last_known_direction = 'left'
+                    elif self._last_known_position[0] > image_center + 100:
+                        self._last_known_direction = 'right'
+                    else:
+                        self._last_known_direction = 'straight'
+            
+        except Exception as e:
+            rospy.logerr(f"Error in image processing: {str(e)}")
 
-        self._error = yellow_error + white_error
-    
     def isTimeToStop(self):
         return False
     
@@ -703,52 +755,162 @@ class TailingRightTurn(TurnRightTask):
 
 class Tailing(FinalBehaviorMainTask):
     def __init__(self, detection_threshold=1000):
-        self._bridge = CvBridge()
-        self._duckie_blue_mask = None
-        self._duckiebot_last_seen = None
         self._detection_threshold = detection_threshold
+        self._bridge = CvBridge()
+        
+        # State tracking
+        self._last_known_position = None  # (x, y) in image coordinates
+        self._last_known_direction = None  # 'left', 'right', or 'straight'
+        self._at_intersection = False
+        self._leader_lost = False
+        self._following_active = False
+        
+        # Image dimensions (will be set in first callback)
+        self._image_width = None
+        self._image_height = None
+        
+        # LED colors
+        self._led_colors = {
+            'following': ColorRGBA(r=0.0, g=1.0, b=0.0, a=1.0),  # Green when following
+            'searching': ColorRGBA(r=1.0, g=1.0, b=0.0, a=1.0),  # Yellow when lost
+            'inactive': ColorRGBA(r=0.0, g=0.0, b=0.0, a=1.0)    # Off when not following
+        }
 
     def onStart(self, dtros):
         vehicle_name = os.environ["VEHICLE_NAME"]
-        self._raw_image_topic = f"/{vehicle_name}/camera_node/image/compressed"
-        dtros._sub_raw_image = rospy.Subscriber(self._raw_image_topic, CompressedImage, self.callback_raw_image)
+        
+        # Camera subscription
+        camera_topic = f"/{vehicle_name}/camera_node/image/compressed"
+        dtros._sub_camera = rospy.Subscriber(camera_topic, CompressedImage, self.callback_raw_image)
+        
+        # LED control
+        led_topic = f"/{vehicle_name}/led_emitter_node/led_pattern"
+        dtros._led_publisher = rospy.Publisher(led_topic, LEDPattern, queue_size=1)
+        
+        # Wheels control
+        wheels_topic = f"/{vehicle_name}/wheels_driver_node/wheels_cmd"
+        dtros._wheels_publisher = rospy.Publisher(wheels_topic, WheelsCmdStamped, queue_size=1)
+
+    def set_led_pattern(self, dtros, state):
+        pattern = LEDPattern()
+        pattern.header = Header()
+        pattern.header.stamp = rospy.Time.now()
+        color = self._led_colors[state]
+        
+        # Set all LEDs to the same color
+        pattern.rgb_vals = [color] * 5
+        dtros._led_publisher.publish(pattern)
 
     def callback_raw_image(self, msg):
-        image = self._bridge.compressed_imgmsg_to_cv2(msg)
-        undistorted = ImageOperations.undistort(image)
-        self._duckie_blue_mask = ImageOperations.getDuckiebotBlueMask(undistorted)
-
-        if MaskOperations.getActiveCount(self._duckie_blue_mask) > self._detection_threshold :
-            if MaskOperations.getActiveCenter(self._duckie_blue_mask)[0] > ImageOperations.getImageWidth(self._duckie_blue_mask) - (4 * ImageOperations.getImageWidth(self._duckie_blue_mask)) // 9:
-                self._duckiebot_last_seen = "Right"
-            elif MaskOperations.getActiveCenter(self._duckie_blue_mask)[0] < (4 * ImageOperations.getImageWidth(self._duckie_blue_mask)) // 9:
-                self._duckiebot_last_seen = "Left"
-            else:
-                self._duckiebot_last_seen = "Straight"
+        try:
+            # Convert compressed image
+            cv_image = self._bridge.compressed_imgmsg_to_cv2(msg)
             
-        print(self._duckiebot_last_seen)
+            # Set image dimensions if not set
+            if self._image_height is None or self._image_width is None:
+                self._image_height, self._image_width = cv_image.shape[:2]
+            
+            # Convert to HSV for better color detection
+            hsv = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
+            
+            # Detect red lines (intersection)
+            red_lower = np.array([0, 50, 50])
+            red_upper = np.array([10, 255, 255])
+            red_mask = cv2.inRange(hsv, red_lower, red_upper)
+            
+            # Detect blue (leader Duckiebot)
+            blue_lower = np.array([100, 50, 50])
+            blue_upper = np.array([130, 255, 255])
+            blue_mask = cv2.inRange(hsv, blue_lower, blue_upper)
+            
+            # Check if at intersection
+            red_pixels = np.sum(red_mask > 0)
+            self._at_intersection = red_pixels > self._detection_threshold
+            
+            # Find leader position
+            blue_pixels = np.sum(blue_mask > 0)
+            if blue_pixels > self._detection_threshold:
+                # Get centroid of blue area
+                M = cv2.moments(blue_mask)
+                if M["m00"] > 0:
+                    cx = int(M["m10"] / M["m00"])
+                    cy = int(M["m01"] / M["m00"])
+                    self._last_known_position = (cx, cy)
+                    self._leader_lost = False
+                    self._following_active = True
+            else:
+                self._leader_lost = True
+            
+            # Update LED state
+            if self._following_active:
+                if self._leader_lost:
+                    self.set_led_pattern(dtros, 'searching')
+                else:
+                    self.set_led_pattern(dtros, 'following')
+            else:
+                self.set_led_pattern(dtros, 'inactive')
+            
+            # Store direction at intersection
+            if self._at_intersection and not self._leader_lost:
+                # Determine turn direction based on leader position
+                image_center = cv_image.shape[1] // 2
+                if self._last_known_position:
+                    if self._last_known_position[0] < image_center - 100:
+                        self._last_known_direction = 'left'
+                    elif self._last_known_position[0] > image_center + 100:
+                        self._last_known_direction = 'right'
+                    else:
+                        self._last_known_direction = 'straight'
+            
+        except Exception as e:
+            rospy.logerr(f"Error in image processing: {str(e)}")
 
     def isTargetTooClose(self):
-        return MaskOperations.getActiveCount(self._duckie_blue_mask) > self._detection_threshold
-    
+        # Implement safe following distance logic
+        if not self._last_known_position:
+            return False
+        
+        # If the leader is in the bottom third of the image, they're too close
+        return self._last_known_position[1] > (self._image_height * 2/3)
+
     def runTask(self, dtros):
-        subtasks = [
-            TailUntilIntersection(base_velocity=0.5, tailing_task=self),
-            TailingLeftTurn(tailing_task=self),
-            TailingRightTurn(tailing_task=self)
-        ]
-
-        while True:
-            TailUntilIntersection(base_velocity=0.5, tailing_task=self).execute(dtros)
-            Stop(stop_time=3).execute(dtros)
-            if self._duckiebot_last_seen == "Right":
-                TailingRightTurn(tailing_task=self).execute(dtros)
-            elif self._duckiebot_last_seen == "Left":
-                TailingLeftTurn(tailing_task=self).execute(dtros)
+        rate = rospy.Rate(10)
+        base_speed = 0.3
+        
+        while not rospy.is_shutdown():
+            if self._leader_lost:
+                if self._at_intersection and self._last_known_direction:
+                    # Execute remembered turn
+                    if self._last_known_direction == 'left':
+                        TurnLeftTask().execute(dtros)
+                    elif self._last_known_direction == 'right':
+                        TurnRightTask().execute(dtros)
+                    # Reset direction after executing turn
+                    self._last_known_direction = None
+                else:
+                    # Continue straight but slower when searching
+                    msg = WheelsCmdStamped(vel_left=base_speed*0.7, vel_right=base_speed*0.7)
+                    dtros._wheels_publisher.publish(msg)
             else:
-                DriveOverRedline().execute(dtros)
-
-        # rate = rospy.Rate(10)
-
-        # while not rospy.is_shutdown():
-        #     rate.sleep()
+                if self._at_intersection:
+                    # Slow down at intersections
+                    msg = WheelsCmdStamped(vel_left=base_speed*0.5, vel_right=base_speed*0.5)
+                elif self.isTargetTooClose():
+                    # Slow down if too close
+                    msg = WheelsCmdStamped(vel_left=base_speed*0.3, vel_right=base_speed*0.3)
+                else:
+                    # Normal following speed
+                    msg = WheelsCmdStamped(vel_left=base_speed, vel_right=base_speed)
+                    
+                # Adjust steering based on leader position
+                if self._last_known_position:
+                    image_center = self._image_width // 2
+                    error = (self._last_known_position[0] - image_center) / image_center
+                    steering_factor = 0.3  # Adjust this for steering sensitivity
+                    
+                    msg.vel_left -= error * steering_factor
+                    msg.vel_right += error * steering_factor
+                
+                dtros._wheels_publisher.publish(msg)
+            
+            rate.sleep()
