@@ -11,7 +11,6 @@ from cv_bridge import CvBridge
 import time
 
 class VehicleAvoidanceMain(DTROS):
-
     def __init__(self, node_name, tasks, loopTasks, proportional_gain=0.0000002, derivative_gain=0.0000002, integral_gain=0.0000002, velocity=0.3, integral_saturation=500000, duckie_detection_sensitivity=2000, duckie_detection_distance=50000, lane_correction_delay=2):
         # initialize the DTROS parent class
         super(VehicleAvoidanceMain, self).__init__(node_name=node_name, node_type=NodeType.GENERIC)

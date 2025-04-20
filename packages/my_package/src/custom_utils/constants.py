@@ -5,3 +5,7 @@ class Stall(Enum):
     TWO = 58
     THREE = 13
     FOUR = 47
+
+class Lane(Enum):
+    LEFT = 1
+    RIGHT = 2
