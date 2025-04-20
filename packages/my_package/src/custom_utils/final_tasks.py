@@ -755,23 +755,23 @@ class Tailing(FinalBehaviorMainTask):
 
 class TailingWithBluePID(FinalBehaviorMainTask):
     def __init__(self, base_velocity=0.3, debug=True):
-        # PID state for lane following
+        # Lane-following PID state
         self._lane_error_last = 0
         self._lane_integration = 0
         self._lane_error = 0
-        # PID state for blue-robot following
+
+        # Blue-following PID state
         self._blue_error_last = 0
         self._blue_integration = 0
         self._blue_error = 0
         self._blue_detected = False
 
-        # Gains and limits for lane PID
+        # PID gains & limits (tune separately)
         self._kp_lane = 2e-7
         self._kd_lane = 2e-7
         self._ki_lane = 2e-7
         self._i_sat_lane = 500_000
 
-        # Gains and limits for blue-target PID
         self._kp_blue = 1e-4
         self._kd_blue = 1e-4
         self._ki_blue = 5e-6
@@ -783,46 +783,43 @@ class TailingWithBluePID(FinalBehaviorMainTask):
         self._state = 'FOLLOW_LANE'
 
     def onStart(self, dtros):
-        vehicle_name = os.environ['VEHICLE_NAME']
-        topic = f"/{vehicle_name}/camera_node/image/compressed"
+        vehicle = os.environ['VEHICLE_NAME']
+        topic = f"/{vehicle}/camera_node/image/compressed"
         dtros._sub_raw_image = rospy.Subscriber(topic, CompressedImage, self.callback_raw_image)
 
     def callback_raw_image(self, msg):
-        # Undistort & warp
-        img = self._bridge.compressed_imgmsg_to_cv2(msg)
-        undistorted = ImageOperations.undistort(img)
+        # Convert ROS image to OpenCV
+        raw = self._bridge.compressed_imgmsg_to_cv2(msg)
 
-        # LANE DETECTION
-        H = ImageOperations.getHomography(undistorted)
-        mask_w = ImageOperations.getWhiteMask(H)
-        mask_y = ImageOperations.getYellowMask(H)
-        err_w = MaskOperations.computeErrorInAxisX(mask_w, target_x=489, pixel_value=1)
-        err_y = MaskOperations.computeErrorInAxisX(mask_y, target_x=100, pixel_value=1)
+        # Undistort
+        undist = ImageOperations.undistort(raw)
+        # Warp to bird's-eye for lane masks
+        warped = ImageOperations.getHomography(undist)
+
+        # LANE ERROR: sum of white & yellow deviations
+        mask_w = ImageOperations.getWhiteMask(warped)
+        mask_y = ImageOperations.getYellowMask(warped)
+        err_w = MaskOperations.computeErrorInAxisX(mask_w, target_x=ImageOperations.getCenterAxisX(warped) + (warped.shape[1]//2 - 489), pixel_value=1)
+        err_y = MaskOperations.computeErrorInAxisX(mask_y, target_x=ImageOperations.getCenterAxisX(warped) - (100), pixel_value=1)
         self._lane_error = err_w + err_y
 
-        # BLUE ROBOT DETECTION
-        hsv = cv2.cvtColor(undistorted, cv2.COLOR_BGR2HSV)
-        lower = np.array([100, 150, 50])
-        upper = np.array([140, 255, 255])
-        mask_b = cv2.inRange(hsv, lower, upper)
-        mask_b = cv2.morphologyEx(mask_b, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
-
+        # BLUE ROBOT ERROR: lateral offset from image center
+        mask_b = ImageOperations.getDuckiebotBlueMask(undist)
         cx, _ = MaskOperations.getActiveCenter(mask_b)
         if cx != -math.inf:
-            # Detected a blue blob
-            self._blue_error = cx - (undistorted.shape[1] // 2)
             self._blue_detected = True
+            center_x = ImageOperations.getCenterAxisX(undist)
+            self._blue_error = cx - center_x
             self._state = 'TAIL_BLUE'
         else:
-            self._blue_error = 0
             self._blue_detected = False
+            self._blue_error = 0
             self._state = 'FOLLOW_LANE'
 
         if self._debug:
-            rospy.loginfo(f"State={self._state}, lane_error={self._lane_error:.1f}, blue_error={self._blue_error:.1f}")
+            rospy.loginfo(f"[TailingWithBluePID] state={self._state}, lane_error={self._lane_error:.1f}, blue_error={self._blue_error:.1f}")
 
     def isTimeToStop(self):
-        # Can add stopping logic if desired
         return False
 
     def runTask(self, dtros):
@@ -832,8 +829,8 @@ class TailingWithBluePID(FinalBehaviorMainTask):
                 break
 
             if self._state == 'TAIL_BLUE':
-                # PID on blue error (steering)
-                i_b, e_b, msg = PIDOperations.getForwardPIDWheelMsg(
+                # Use blue-following PID
+                i_new, e_new, cmd = PIDOperations.getForwardPIDWheelMsg(
                     base_velocity=self._base_velocity * 0.8,
                     error_last=self._blue_error_last,
                     integration_stored=self._blue_integration,
@@ -843,12 +840,12 @@ class TailingWithBluePID(FinalBehaviorMainTask):
                     integral_gain=self._ki_blue,
                     integral_saturation=self._i_sat_blue,
                 )
-                self._blue_integration = i_b
-                self._blue_error_last = e_b
+                self._blue_integration = i_new
+                self._blue_error_last = e_new
 
             else:
-                # PID on lane error (steering)
-                i_l, e_l, msg = PIDOperations.getForwardPIDWheelMsg(
+                # Use lane-following PID
+                i_new, e_new, cmd = PIDOperations.getForwardPIDWheelMsg(
                     base_velocity=self._base_velocity,
                     error_last=self._lane_error_last,
                     integration_stored=self._lane_integration,
@@ -858,8 +855,8 @@ class TailingWithBluePID(FinalBehaviorMainTask):
                     integral_gain=self._ki_lane,
                     integral_saturation=self._i_sat_lane,
                 )
-                self._lane_integration = i_l
-                self._lane_error_last = e_l
+                self._lane_integration = i_new
+                self._lane_error_last = e_new
 
-            dtros._wheels_publisher.publish(msg)
+            dtros._wheels_publisher.publish(cmd)
             rate.sleep()
