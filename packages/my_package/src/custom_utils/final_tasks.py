@@ -781,7 +781,8 @@ class Tailing(FinalBehaviorMainTask):
         
         # Camera subscription
         camera_topic = f"/{vehicle_name}/camera_node/image/compressed"
-        dtros._sub_camera = rospy.Subscriber(camera_topic, CompressedImage, self.callback_raw_image)
+        dtros._sub_camera = rospy.Subscriber(camera_topic, CompressedImage, 
+            lambda msg: self.callback_raw_image(msg, dtros))
         
         # LED control
         led_topic = f"/{vehicle_name}/led_emitter_node/led_pattern"
@@ -801,7 +802,7 @@ class Tailing(FinalBehaviorMainTask):
         pattern.rgb_vals = [color] * 5
         dtros._led_publisher.publish(pattern)
 
-    def callback_raw_image(self, msg):
+    def callback_raw_image(self, msg, dtros):
         try:
             # Convert compressed image
             cv_image = self._bridge.compressed_imgmsg_to_cv2(msg)
