@@ -755,26 +755,32 @@ class Tailing(FinalBehaviorMainTask):
 
 class TailingWithBluePID(FinalBehaviorMainTask):
     def __init__(self, base_velocity=0.3, scale=0.5, debug=True):
-        # PID states for lane and blue
+        # PID states for lane-following
         self._lane_error_last = 0
         self._lane_integration = 0
+        # PID states for blue-following
         self._blue_error_last = 0
         self._blue_integration = 0
+        
+        # Detection flag
         self._blue_detected = False
 
-        # Gains & limits for lane PID
+        # Current error
+        self._error = 0
+
+        # PID gains & limits for lane-following
         self._kp_lane = 2e-7
         self._kd_lane = 2e-7
         self._ki_lane = 2e-7
         self._i_sat_lane = 500_000
-        # Gains & limits for blue PID
+        # PID gains & limits for blue-following
         self._kp_blue = 1e-4
         self._kd_blue = 1e-4
         self._ki_blue = 5e-6
         self._i_sat_blue = 100_000
 
         self._base_velocity = base_velocity
-        self._scale = scale            # downscale factor for performance
+        self._scale = scale  # downscale factor for performance
         self._debug = debug
         self._bridge = CvBridge()
 
@@ -784,18 +790,17 @@ class TailingWithBluePID(FinalBehaviorMainTask):
         dtros._sub_raw_image = rospy.Subscriber(topic, CompressedImage, self.callback_raw_image)
 
     def callback_raw_image(self, msg):
-        # Convert ROS image to CV
+        # Convert ROS image to OpenCV
         raw = self._bridge.compressed_imgmsg_to_cv2(msg)
-        # Undistort full-res
+        # Undistort full resolution
         undist_full = ImageOperations.undistort(raw)
-        # Bird's-eye warp full-res
+        # Bird's-eye warp full resolution
         warped_full = ImageOperations.getHomography(undist_full)
-        # Downscale for processing
+        # Downscale images
         undist = cv2.resize(undist_full, None, fx=self._scale, fy=self._scale)
         warped = cv2.resize(warped_full, None, fx=self._scale, fy=self._scale)
 
-        # LANE ERROR: compute on warped
-        # Scale original target_x constants by scale factor
+        # Compute lane error on warped image
         target_x_white = int(489 * self._scale)
         target_x_yellow = int(100 * self._scale)
         mask_w = ImageOperations.getWhiteMask(warped)
@@ -804,7 +809,7 @@ class TailingWithBluePID(FinalBehaviorMainTask):
         err_y = MaskOperations.computeErrorInAxisX(mask_y, target_x=target_x_yellow, pixel_value=1)
         lane_error = err_w + err_y
 
-        # BLUE ROBOT ERROR: compute on downscaled undist
+        # Compute blue robot error on downscaled undistorted image
         mask_b = ImageOperations.getDuckiebotBlueMask(undist)
         cx_b, _ = MaskOperations.getActiveCenter(mask_b)
         if cx_b != -math.inf:
@@ -815,14 +820,15 @@ class TailingWithBluePID(FinalBehaviorMainTask):
             self._blue_detected = False
             blue_error = 0
 
-        # Choose error based on state
+        # Select which error to use
         if self._blue_detected:
-            self._current_error = blue_error
+            self._error = blue_error
         else:
-            self._current_error = lane_error
+            self._error = lane_error
 
         if self._debug:
-            rospy.loginfo(f"State={'TAIL_BLUE' if self._blue_detected else 'FOLLOW_LANE'}, error={self._current_error:.1f}")(f"State={'TAIL_BLUE' if self._blue_detected else 'FOLLOW_LANE'}, error={self._current_error:.1f}")
+            state = 'TAIL_BLUE' if self._blue_detected else 'FOLLOW_LANE'
+            rospy.loginfo(f"[{self.__class__.__name__}] state={state}, error={self._error:.1f}")
 
     def isTimeToStop(self):
         return False
@@ -833,13 +839,16 @@ class TailingWithBluePID(FinalBehaviorMainTask):
             if self.isTimeToStop():
                 break
 
+            # Adjust base speed if tailing
+            speed = self._base_velocity * (0.8 if self._blue_detected else 1.0)
+
+            # Run the appropriate PID
             if self._blue_detected:
-                # Blue-target PID
                 i_new, e_new, cmd = PIDOperations.getForwardPIDWheelMsg(
-                    base_velocity=self._base_velocity * 0.8,
+                    base_velocity=speed,
                     error_last=self._blue_error_last,
                     integration_stored=self._blue_integration,
-                    error=self._current_error,
+                    error=self._error,
                     proportional_gain=self._kp_blue,
                     derivative_gain=self._kd_blue,
                     integral_gain=self._ki_blue,
@@ -848,12 +857,11 @@ class TailingWithBluePID(FinalBehaviorMainTask):
                 self._blue_integration = i_new
                 self._blue_error_last = e_new
             else:
-                # Lane-following PID
                 i_new, e_new, cmd = PIDOperations.getForwardPIDWheelMsg(
-                    base_velocity=self._base_velocity,
+                    base_velocity=speed,
                     error_last=self._lane_error_last,
                     integration_stored=self._lane_integration,
-                    error=self._current_error,
+                    error=self._error,
                     proportional_gain=self._kp_lane,
                     derivative_gain=self._kd_lane,
                     integral_gain=self._ki_lane,
