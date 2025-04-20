@@ -754,26 +754,29 @@ class Tailing(FinalBehaviorMainTask):
         #     rate.sleep()
 
 class TailingWithBluePID(FinalBehaviorMainTask):
-    def __init__(self, base_velocity=0.3, debug=True):
-        # Single PID state
-        self._error_last = 0
-        self._integration = 0
-        self._error = 0
-
-        # PID gains & limit (tune these)
-        self._kp = 2e-7
-        self._kd = 2e-7
-        self._ki = 2e-7
-        self._i_sat = 500_000
-
-        self._base_velocity = base_velocity
-        self._debug = debug
-        self._bridge = CvBridge()
+    def __init__(self, base_velocity=0.3, scale=0.5, debug=True):
+        # PID states for lane and blue
+        self._lane_error_last = 0
+        self._lane_integration = 0
+        self._blue_error_last = 0
+        self._blue_integration = 0
         self._blue_detected = False
 
-        # Precompute homography matrix once
-        # Assuming ImageOperations can expose homography matrix generation
-        self._H_matrix, self._warp_size = ImageOperations.getHomographySetup()
+        # Gains & limits for lane PID
+        self._kp_lane = 2e-7
+        self._kd_lane = 2e-7
+        self._ki_lane = 2e-7
+        self._i_sat_lane = 500_000
+        # Gains & limits for blue PID
+        self._kp_blue = 1e-4
+        self._kd_blue = 1e-4
+        self._ki_blue = 5e-6
+        self._i_sat_blue = 100_000
+
+        self._base_velocity = base_velocity
+        self._scale = scale            # downscale factor for performance
+        self._debug = debug
+        self._bridge = CvBridge()
 
     def onStart(self, dtros):
         vehicle = os.environ['VEHICLE_NAME']
@@ -781,39 +784,45 @@ class TailingWithBluePID(FinalBehaviorMainTask):
         dtros._sub_raw_image = rospy.Subscriber(topic, CompressedImage, self.callback_raw_image)
 
     def callback_raw_image(self, msg):
-        # Convert ROS image to OpenCV
+        # Convert ROS image to CV
         raw = self._bridge.compressed_imgmsg_to_cv2(msg)
+        # Undistort full-res
+        undist_full = ImageOperations.undistort(raw)
+        # Bird's-eye warp full-res
+        warped_full = ImageOperations.getHomography(undist_full)
+        # Downscale for processing
+        undist = cv2.resize(undist_full, None, fx=self._scale, fy=self._scale)
+        warped = cv2.resize(warped_full, None, fx=self._scale, fy=self._scale)
 
-        # Undistort once via optimized remap
-        undist = ImageOperations.undistort(raw)
-
-        # Lane warp using precomputed matrix
-        warped = cv2.warpPerspective(undist, self._H_matrix, self._warp_size)
-
-        # LANE ERROR
+        # LANE ERROR: compute on warped
+        # Scale original target_x constants by scale factor
+        target_x_white = int(489 * self._scale)
+        target_x_yellow = int(100 * self._scale)
         mask_w = ImageOperations.getWhiteMask(warped)
         mask_y = ImageOperations.getYellowMask(warped)
-        cx_center = ImageOperations.getCenterAxisX(warped)
-        err_w = MaskOperations.computeErrorInAxisX(mask_w, target_x=cx_center + (warped.shape[1]//2 - 489), pixel_value=1)
-        err_y = MaskOperations.computeErrorInAxisX(mask_y, target_x=cx_center - 100, pixel_value=1)
+        err_w = MaskOperations.computeErrorInAxisX(mask_w, target_x=target_x_white, pixel_value=1)
+        err_y = MaskOperations.computeErrorInAxisX(mask_y, target_x=target_x_yellow, pixel_value=1)
         lane_error = err_w + err_y
 
-        # BLUE DETECTION
+        # BLUE ROBOT ERROR: compute on downscaled undist
         mask_b = ImageOperations.getDuckiebotBlueMask(undist)
         cx_b, _ = MaskOperations.getActiveCenter(mask_b)
         if cx_b != -math.inf:
             self._blue_detected = True
-            img_center_x = ImageOperations.getCenterAxisX(undist)
-            blue_error = cx_b - img_center_x
-            current_error = blue_error
+            img_center = ImageOperations.getCenterAxisX(undist)
+            blue_error = cx_b - img_center
         else:
             self._blue_detected = False
-            current_error = lane_error
+            blue_error = 0
 
-        self._error = current_error
+        # Choose error based on state
+        if self._blue_detected:
+            self._current_error = blue_error
+        else:
+            self._current_error = lane_error
 
         if self._debug:
-            rospy.loginfo(f"[TailingWithBluePID] blue_detected={self._blue_detected}, error={self._error:.1f}")
+            rospy.loginfo(f"State={'TAIL_BLUE' if self._blue_detected else 'FOLLOW_LANE'}, error={self._current_error:.1f}")(f"State={'TAIL_BLUE' if self._blue_detected else 'FOLLOW_LANE'}, error={self._current_error:.1f}")
 
     def isTimeToStop(self):
         return False
@@ -824,21 +833,34 @@ class TailingWithBluePID(FinalBehaviorMainTask):
             if self.isTimeToStop():
                 break
 
-            speed = self._base_velocity * (0.8 if self._blue_detected else 1.0)
-            i_new, e_new, cmd = PIDOperations.getForwardPIDWheelMsg(
-                base_velocity=speed,
-                error_last=self._error_last,
-                integration_stored=self._integration,
-                error=self._error,
-                proportional_gain=self._kp,
-                derivative_gain=self._kd,
-                integral_gain=self._ki,
-                integral_saturation=self._i_sat,
-            )
-
-            # update state
-            self._integration = i_new
-            self._error_last = e_new
+            if self._blue_detected:
+                # Blue-target PID
+                i_new, e_new, cmd = PIDOperations.getForwardPIDWheelMsg(
+                    base_velocity=self._base_velocity * 0.8,
+                    error_last=self._blue_error_last,
+                    integration_stored=self._blue_integration,
+                    error=self._current_error,
+                    proportional_gain=self._kp_blue,
+                    derivative_gain=self._kd_blue,
+                    integral_gain=self._ki_blue,
+                    integral_saturation=self._i_sat_blue,
+                )
+                self._blue_integration = i_new
+                self._blue_error_last = e_new
+            else:
+                # Lane-following PID
+                i_new, e_new, cmd = PIDOperations.getForwardPIDWheelMsg(
+                    base_velocity=self._base_velocity,
+                    error_last=self._lane_error_last,
+                    integration_stored=self._lane_integration,
+                    error=self._current_error,
+                    proportional_gain=self._kp_lane,
+                    derivative_gain=self._kd_lane,
+                    integral_gain=self._ki_lane,
+                    integral_saturation=self._i_sat_lane,
+                )
+                self._lane_integration = i_new
+                self._lane_error_last = e_new
 
             dtros._wheels_publisher.publish(cmd)
             rate.sleep()
